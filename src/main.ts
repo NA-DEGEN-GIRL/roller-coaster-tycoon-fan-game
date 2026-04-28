@@ -9,9 +9,13 @@ type GridCoord = {
 };
 
 type QueueDirection = 'north' | 'east' | 'south' | 'west';
+type QueueEdge = QueueDirection;
 
 type QueuePath = {
   group: THREE.Group;
+  arrow: THREE.Group;
+  entryArrow: THREE.Group;
+  fences: THREE.Group;
   direction: QueueDirection;
 };
 
@@ -185,6 +189,7 @@ const rideFoundationGeometry = new THREE.BoxGeometry(tileSize * 0.98, 0.08, tile
 const rideBoundaryLongGeometry = new THREE.BoxGeometry(tileSize * 3.02, 0.16, 0.12);
 const rideBoundaryShortGeometry = new THREE.BoxGeometry(0.12, 0.16, tileSize * 3.02);
 const queueFenceGeometry = new THREE.BoxGeometry(0.08, 0.32, tileSize * 0.76);
+const queueFenceCrossGeometry = new THREE.BoxGeometry(tileSize * 0.76, 0.32, 0.08);
 const queueArrowShape = new THREE.Shape();
 queueArrowShape.moveTo(0, -0.42);
 queueArrowShape.lineTo(-0.24, 0.08);
@@ -222,6 +227,8 @@ let cameraYaw = baseCameraYaw;
 let cameraZoom = 1;
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 let isMiddleDragging = false;
+let isPathDragging = false;
+let lastDraggedBuildKey: string | null = null;
 let lastDragX = 0;
 let lastDragY = 0;
 const pressedMovementKeys = new Set<string>();
@@ -279,10 +286,30 @@ const queueDirectionVectors: Record<QueueDirection, GridCoord> = {
   west: { x: -1, z: 0 },
 };
 const queueDirectionLabels: Record<QueueDirection, string> = {
-  north: 'N',
-  east: 'E',
-  south: 'S',
-  west: 'W',
+  north: '↑',
+  east: '→',
+  south: '↓',
+  west: '←',
+};
+const oppositeQueueDirection: Record<QueueDirection, QueueDirection> = {
+  north: 'south',
+  east: 'west',
+  south: 'north',
+  west: 'east',
+};
+
+const edgeFromDelta = (dx: number, dz: number): QueueEdge | null => {
+  if (dx === 1 && dz === 0) return 'east';
+  if (dx === -1 && dz === 0) return 'west';
+  if (dx === 0 && dz === 1) return 'south';
+  if (dx === 0 && dz === -1) return 'north';
+  return null;
+};
+
+const directionBetweenKeys = (fromKey: string, toKey: string) => {
+  const from = parseKey(fromKey);
+  const to = parseKey(toKey);
+  return edgeFromDelta(to.x - from.x, to.z - from.z);
 };
 
 const keyInDirection = (key: string, direction: QueueDirection) => {
@@ -296,23 +323,34 @@ const queueForwardKey = (key: string) => {
   return queuePath ? keyInDirection(key, queuePath.direction) : key;
 };
 
-const queueBackKey = (key: string) => {
+const incomingQueueKeys = (key: string) =>
+  adjacentKeys(parseKey(key)).filter((neighborKey) => queuePaths.has(neighborKey) && queueForwardKey(neighborKey) === key);
+
+const queueEntryPathKeys = (key: string) => {
   const queuePath = queuePaths.get(key);
-  if (!queuePath) return key;
-  const coord = parseKey(key);
-  const vector = queueDirectionVectors[queuePath.direction];
-  return keyOf(coord.x - vector.x, coord.z - vector.z);
+  if (!queuePath) return [];
+
+  const candidates = queueDirectionOrder
+    .filter((direction) => direction !== queuePath.direction)
+    .map((direction) => keyInDirection(key, direction))
+    .filter((pathKey) => paths.has(pathKey));
+  if (candidates.length === 0) return [];
+
+  const preferredBackKey = keyInDirection(key, oppositeQueueDirection[queuePath.direction]);
+  return [candidates.includes(preferredBackKey) ? preferredBackKey : candidates[0]];
 };
 
 const rideConnectionStatus = (ride: Ride) => {
   const hasQueueConnection = ride.entranceKey
     ? adjacentKeys(parseKey(ride.entranceKey)).some((key) => queuePaths.has(key) && queueForwardKey(key) === ride.entranceKey)
     : false;
+  const hasQueueEntryPath = ride.entranceKey ? queueTailKeysForRide(ride).some((key) => queueEntryPathKeys(key).length > 0) : false;
   const hasExitPath = ride.exitKey ? adjacentKeys(parseKey(ride.exitKey)).some((key) => paths.has(key)) : false;
   return {
     hasQueueConnection,
+    hasQueueEntryPath,
     hasExitPath,
-    ready: ride.isOpen && Boolean(ride.entranceKey) && Boolean(ride.exitKey) && hasQueueConnection && hasExitPath,
+    ready: ride.isOpen && Boolean(ride.entranceKey) && Boolean(ride.exitKey) && hasQueueConnection && hasQueueEntryPath && hasExitPath,
   };
 };
 
@@ -392,6 +430,8 @@ const updateSelectedRidePanel = () => {
     selectedRideStatus.textContent = 'Needs entrance';
   } else if (!connection.hasQueueConnection) {
     selectedRideStatus.textContent = 'Connect entrance to queue';
+  } else if (!connection.hasQueueEntryPath) {
+    selectedRideStatus.textContent = 'Connect queue tail to path';
   } else if (!ride.exitKey) {
     selectedRideStatus.textContent = 'Needs exit';
   } else if (!connection.hasExitPath) {
@@ -464,6 +504,7 @@ rideToolButtons.forEach((button) => {
 
 queueDirectionButtons.forEach((button) => {
   button.addEventListener('click', () => {
+    if (activeTool !== 'queue') setTool('queue');
     setQueueBuildDirection(button.dataset.queueDirection as QueueDirection);
   });
 });
@@ -595,6 +636,12 @@ const updatePreview = () => {
   }
 };
 
+const buildDraggedPathAt = (coord: GridCoord) => {
+  if (activeTool === 'path') return addPath(coord);
+  if (activeTool === 'queue') return addQueuePath(coord);
+  return false;
+};
+
 const addPath = (coord: GridCoord, silent = false) => {
   if (!canPlacePath(coord)) return false;
 
@@ -604,11 +651,25 @@ const addPath = (coord: GridCoord, silent = false) => {
   path.receiveShadow = true;
   buildGroup.add(path);
   paths.set(key, path);
+  refreshQueueVisualsAround(coord);
 
   if (!silent) setStatus(`Path built at ${key}`);
   refreshStats();
   updateSelectedRidePanel();
   return true;
+};
+
+const createQueueFence = (edge: QueueEdge) => {
+  const isHorizontal = edge === 'north' || edge === 'south';
+  const fence = new THREE.Mesh(isHorizontal ? queueFenceCrossGeometry : queueFenceGeometry, queueFenceMaterial);
+  const offset = tileSize * 0.39;
+  if (edge === 'north') fence.position.set(0, 0.26, -offset);
+  if (edge === 'south') fence.position.set(0, 0.26, offset);
+  if (edge === 'east') fence.position.set(offset, 0.26, 0);
+  if (edge === 'west') fence.position.set(-offset, 0.26, 0);
+  fence.castShadow = true;
+  fence.receiveShadow = true;
+  return fence;
 };
 
 const createQueuePath = (direction: QueueDirection, preview = false): QueuePath => {
@@ -621,20 +682,122 @@ const createQueuePath = (direction: QueueDirection, preview = false): QueuePath 
   group.add(base);
 
   const arrow = new THREE.Mesh(queueArrowGeometry, queueArrowMaterial);
+  const arrowPivot = new THREE.Group();
   arrow.position.y = 0.115;
   arrow.rotation.x = -Math.PI / 2;
-  group.add(arrow);
+  arrowPivot.rotation.y = rotationYForQueueDirection(direction);
+  arrowPivot.add(arrow);
+  group.add(arrowPivot);
 
-  [-0.78, 0.78].forEach((x) => {
-    const fence = new THREE.Mesh(queueFenceGeometry, queueFenceMaterial);
-    fence.position.set(x, 0.26, 0);
-    fence.castShadow = true;
-    fence.receiveShadow = true;
-    group.add(fence);
+  const entryArrow = new THREE.Mesh(queueArrowGeometry, queueArrowMaterial);
+  const entryArrowPivot = new THREE.Group();
+  entryArrow.position.y = 0.13;
+  entryArrow.scale.setScalar(0.55);
+  entryArrow.rotation.x = -Math.PI / 2;
+  entryArrowPivot.visible = false;
+  entryArrowPivot.add(entryArrow);
+  group.add(entryArrowPivot);
+
+  const fences = new THREE.Group();
+  group.add(fences);
+  ['east', 'west'].forEach((edge) => fences.add(createQueueFence(edge as QueueEdge)));
+
+  return { group, arrow: arrowPivot, entryArrow: entryArrowPivot, fences, direction };
+};
+
+const refreshQueueVisualAt = (key: string) => {
+  const queuePath = queuePaths.get(key);
+  if (!queuePath) return;
+
+  queuePath.arrow.rotation.y = rotationYForQueueDirection(queuePath.direction);
+  queuePath.entryArrow.visible = false;
+  queuePath.fences.clear();
+
+  const coord = parseKey(key);
+  const openEdges = new Set<QueueEdge>([queuePath.direction]);
+  const incomingKeys = incomingQueueKeys(key);
+  const entryPathKeys = incomingKeys.length === 0 ? queueEntryPathKeys(key) : [];
+
+  incomingKeys.forEach((neighborKey) => {
+    const neighborCoord = parseKey(neighborKey);
+    const edge = edgeFromDelta(neighborCoord.x - coord.x, neighborCoord.z - coord.z);
+    if (edge) openEdges.add(edge);
   });
 
-  group.rotation.y = rotationYForQueueDirection(direction);
-  return { group, direction };
+  entryPathKeys.forEach((pathKey) => {
+    const pathCoord = parseKey(pathKey);
+    const edge = edgeFromDelta(pathCoord.x - coord.x, pathCoord.z - coord.z);
+    if (!edge) return;
+    openEdges.add(edge);
+    const vector = queueDirectionVectors[edge];
+    queuePath.entryArrow.visible = true;
+    queuePath.entryArrow.position.set(vector.x * tileSize * 0.24, 0, vector.z * tileSize * 0.24);
+    queuePath.entryArrow.rotation.y = rotationYForQueueDirection(oppositeQueueDirection[edge]);
+  });
+
+  if (incomingKeys.length === 0 && entryPathKeys.length === 0) openEdges.add(oppositeQueueDirection[queuePath.direction]);
+
+  queueDirectionOrder.forEach((edge) => {
+    if (!openEdges.has(edge)) queuePath.fences.add(createQueueFence(edge));
+  });
+};
+
+const refreshQueueVisualsAround = (coord: GridCoord) => {
+  [keyOf(coord.x, coord.z), ...adjacentKeys(coord)].forEach((key) => refreshQueueVisualAt(key));
+};
+
+const undirectedQueueKeysForRide = (ride: Ride) => {
+  if (!ride.entranceKey) return [];
+
+  const visited = new Set<string>();
+  const queue: Array<{ key: string; depth: number }> = adjacentKeys(parseKey(ride.entranceKey))
+    .filter((key) => queuePaths.has(key))
+    .map((key) => ({ key, depth: 0 }));
+  const result: Array<{ key: string; depth: number }> = [];
+
+  queue.forEach(({ key }) => visited.add(key));
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    result.push(current);
+    adjacentKeys(parseKey(current.key))
+      .filter((key) => queuePaths.has(key) && !visited.has(key))
+      .forEach((key) => {
+        visited.add(key);
+        queue.push({ key, depth: current.depth + 1 });
+      });
+  }
+
+  return result;
+};
+
+const orientQueueForRide = (ride: Ride) => {
+  const queueEntries = undirectedQueueKeysForRide(ride);
+  if (!ride.entranceKey || queueEntries.length === 0) return;
+
+  const depthByKey = new Map(queueEntries.map(({ key, depth }) => [key, depth]));
+  queueEntries.forEach(({ key, depth }) => {
+    const queuePath = queuePaths.get(key);
+    if (!queuePath) return;
+
+    const frontKey =
+      depth === 0
+        ? ride.entranceKey
+        : adjacentKeys(parseKey(key)).find((neighborKey) => {
+            const neighborDepth = depthByKey.get(neighborKey);
+            return neighborDepth !== undefined && neighborDepth === depth - 1;
+          });
+    if (!frontKey) return;
+
+    const direction = directionBetweenKeys(key, frontKey);
+    if (direction) queuePath.direction = direction;
+  });
+
+  queueEntries.forEach(({ key }) => refreshQueueVisualAt(key));
+};
+
+const orientQueuesForRides = () => {
+  rides.forEach((ride) => orientQueueForRide(ride));
 };
 
 const addQueuePath = (coord: GridCoord, silent = false, direction = queueBuildDirection) => {
@@ -645,6 +808,8 @@ const addQueuePath = (coord: GridCoord, silent = false, direction = queueBuildDi
   queuePath.group.position.copy(worldPos(coord.x, coord.z));
   buildGroup.add(queuePath.group);
   queuePaths.set(key, queuePath);
+  orientQueuesForRides();
+  refreshQueueVisualsAround(coord);
 
   if (!silent) setStatus(`Queue path built at ${key} · ${queueDirectionLabels[direction]}`);
   refreshStats();
@@ -733,6 +898,8 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
     ride.exitKey = key;
     exits.set(key, { rideId: ride.id, ...gate });
   }
+  orientQueuesForRides();
+  refreshQueueVisualsAround(coord);
 
   updateSelectedRidePanel();
   if (!silent) {
@@ -1017,6 +1184,7 @@ const removeAt = (coord: GridCoord) => {
     buildGroup.remove(path);
     path.geometry.dispose();
     paths.delete(key);
+    refreshQueueVisualsAround(coord);
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
@@ -1028,6 +1196,8 @@ const removeAt = (coord: GridCoord) => {
   if (queuePath) {
     buildGroup.remove(queuePath.group);
     queuePaths.delete(key);
+    orientQueuesForRides();
+    refreshQueueVisualsAround(coord);
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
@@ -1424,7 +1594,7 @@ const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
 
   const queueKey = adjacentKeys(parseKey(pathKey)).find((candidate) => {
     const ride = rideForQueueKey(candidate);
-    return Boolean(ride && queueTailKeysForRide(ride).includes(candidate) && queueBackKey(candidate) === pathKey);
+    return Boolean(ride && queueTailKeysForRide(ride).includes(candidate) && queueEntryPathKeys(candidate).includes(pathKey));
   });
   if (!queueKey) return false;
 
@@ -1843,6 +2013,14 @@ const handlePointerMove = (event: PointerEvent) => {
   const hit = raycaster.intersectObjects(tiles, false)[0];
   hoveredTile = hit?.object.userData.coord ?? null;
   updatePreview();
+  if (isPathDragging && hoveredTile) {
+    const key = keyOf(hoveredTile.x, hoveredTile.z);
+    if (key !== lastDraggedBuildKey) {
+      buildDraggedPathAt(hoveredTile);
+      lastDraggedBuildKey = key;
+      updatePreview();
+    }
+  }
 };
 
 const handleBuild = (event: PointerEvent) => {
@@ -1868,14 +2046,21 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
+  if (activeTool === 'path' || activeTool === 'queue') {
+    isPathDragging = true;
+    lastDraggedBuildKey = hoverKey;
+    canvas.setPointerCapture(event.pointerId);
+    buildDraggedPathAt(hoveredTile);
+    updatePreview();
+    return;
+  }
+
   if (activeTool === 'select') {
     selectRideAt(hoveredTile);
     updatePreview();
     return;
   }
 
-  if (activeTool === 'path') addPath(hoveredTile);
-  if (activeTool === 'queue') addQueuePath(hoveredTile);
   if (activeTool === 'tree') addTree(hoveredTile);
   if (activeTool === 'carousel') addCarousel(hoveredTile);
   if (activeTool === 'entrance') addRideGate(hoveredTile, 'entrance');
@@ -1888,8 +2073,11 @@ const handleBuild = (event: PointerEvent) => {
 canvas.addEventListener('pointermove', handlePointerMove);
 canvas.addEventListener('pointerdown', handleBuild);
 canvas.addEventListener('pointerup', (event) => {
-  if (event.button !== 1) return;
-  isMiddleDragging = false;
+  if (event.button === 0) {
+    isPathDragging = false;
+    lastDraggedBuildKey = null;
+  }
+  if (event.button === 1) isMiddleDragging = false;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 });
 canvas.addEventListener('auxclick', (event) => {
@@ -1897,6 +2085,8 @@ canvas.addEventListener('auxclick', (event) => {
 });
 canvas.addEventListener('pointerleave', () => {
   isMiddleDragging = false;
+  isPathDragging = false;
+  lastDraggedBuildKey = null;
   hoveredTile = null;
   updatePreview();
 });

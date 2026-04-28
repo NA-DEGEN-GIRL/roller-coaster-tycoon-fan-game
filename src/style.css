@@ -137,8 +137,9 @@ button {
   background: #ffffff;
   color: #263844;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 1rem;
   font-weight: 900;
+  line-height: 1;
 }
 
 .direction-button:hover {
