@@ -31,18 +31,18 @@
             <button class="tool" type="button" title="Carousel set" data-tool="carousel">
               <span class="icon carousel-icon"></span>
             </button>
-            <button class="tool" type="button" title="Entrance" data-tool="entrance">
-              <span class="icon entrance-icon"></span>
-            </button>
-            <button class="tool" type="button" title="Exit" data-tool="exit">
-              <span class="icon exit-icon"></span>
-            </button>
             <button class="tool" type="button" title="Trees" data-tool="tree">
               <span class="icon tree-icon"></span>
             </button>
             <button class="tool" type="button" title="Bulldoze" data-tool="bulldoze">
               <span class="icon bulldoze-icon"></span>
             </button>
+          </div>
+          <div class="queue-direction" aria-label="Queue direction">
+            <button class="direction-button is-active" type="button" data-queue-direction="north">N</button>
+            <button class="direction-button" type="button" data-queue-direction="east">E</button>
+            <button class="direction-button" type="button" data-queue-direction="south">S</button>
+            <button class="direction-button" type="button" data-queue-direction="west">W</button>
           </div>
         </div>
 
@@ -53,10 +53,20 @@
               <strong id="selected-ride-name">No ride selected</strong>
               <span id="selected-ride-status">Place or click a carousel</span>
             </div>
-            <label class="toggle-row">
-              <input id="ride-open-toggle" type="checkbox" disabled />
-              <span>Open</span>
-            </label>
+            <div class="ride-state-toggle" aria-label="Ride operating state">
+              <button id="ride-open-button" class="ride-state-button open" type="button" disabled>Open</button>
+              <button id="ride-close-button" class="ride-state-button closed is-active" type="button" disabled>Closed</button>
+            </div>
+            <div class="ride-actions" aria-label="Selected ride placement tools">
+              <button id="place-entrance-button" class="ride-action" type="button" title="Place entrance" disabled data-ride-tool="entrance">
+                <span class="icon entrance-icon"></span>
+                <span>Entrance</span>
+              </button>
+              <button id="place-exit-button" class="ride-action" type="button" title="Place exit" disabled data-ride-tool="exit">
+                <span class="icon exit-icon"></span>
+                <span>Exit</span>
+              </button>
+            </div>
           </div>
         </div>
 

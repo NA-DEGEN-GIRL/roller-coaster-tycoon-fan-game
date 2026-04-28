@@ -59,11 +59,16 @@ const queueCount = document.querySelector<HTMLElement>('#queue-count');
 const rideCount = document.querySelector<HTMLElement>('#ride-count');
 const selectedRideName = document.querySelector<HTMLElement>('#selected-ride-name');
 const selectedRideStatus = document.querySelector<HTMLElement>('#selected-ride-status');
-const rideOpenToggle = document.querySelector<HTMLInputElement>('#ride-open-toggle');
+const rideOpenButton = document.querySelector<HTMLButtonElement>('#ride-open-button');
+const rideCloseButton = document.querySelector<HTMLButtonElement>('#ride-close-button');
+const placeEntranceButton = document.querySelector<HTMLButtonElement>('#place-entrance-button');
+const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-button');
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
 const debugLog = document.querySelector<HTMLElement>('#debug-log');
 const debugStatus = document.querySelector<HTMLElement>('#debug-status');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
+const rideToolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-ride-tool]'));
+const queueDirectionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-queue-direction]'));
 
 if (
   !canvas ||
@@ -75,7 +80,10 @@ if (
   !rideCount ||
   !selectedRideName ||
   !selectedRideStatus ||
-  !rideOpenToggle ||
+  !rideOpenButton ||
+  !rideCloseButton ||
+  !placeEntranceButton ||
+  !placeExitButton ||
   !continuousRotationToggle ||
   !debugLog ||
   !debugStatus
@@ -303,16 +311,36 @@ const rotationYForQueueDirection = (direction: QueueDirection) => {
   return rotationYForDirection(new THREE.Vector2(vector.x, vector.z));
 };
 
+const updateQueueDirectionButtons = () => {
+  queueDirectionButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.queueDirection === queueBuildDirection);
+  });
+};
+
+const setQueueBuildDirection = (direction: QueueDirection) => {
+  queueBuildDirection = direction;
+  updateQueueDirectionButtons();
+  if (activeTool === 'queue') setStatus(`Queue direction ${queueDirectionLabels[queueBuildDirection]} · R rotate`);
+  updatePreview();
+};
+
 const rotateQueueBuildDirection = (step: 1 | -1 = 1) => {
   const currentIndex = queueDirectionOrder.indexOf(queueBuildDirection);
   const nextIndex = (currentIndex + step + queueDirectionOrder.length) % queueDirectionOrder.length;
-  queueBuildDirection = queueDirectionOrder[nextIndex];
-  setStatus(`Queue direction ${queueDirectionLabels[queueBuildDirection]} · R rotate`);
+  setQueueBuildDirection(queueDirectionOrder[nextIndex]);
 };
 
 const updateRideVisual = (ride: Ride) => {
   const connection = rideConnectionStatus(ride);
   ride.statusLight.material = connection.ready ? openMaterial : closedMaterial;
+};
+
+const updateRideToolButtons = (ride?: Ride) => {
+  placeEntranceButton.disabled = !ride || Boolean(ride.entranceKey);
+  placeExitButton.disabled = !ride || Boolean(ride.exitKey);
+  rideToolButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.rideTool === activeTool);
+  });
 };
 
 const updateSelectedRidePanel = () => {
@@ -321,15 +349,20 @@ const updateSelectedRidePanel = () => {
     selectedRideId = null;
     selectedRideName.textContent = 'No ride selected';
     selectedRideStatus.textContent = 'Place or click a carousel';
-    rideOpenToggle.checked = false;
-    rideOpenToggle.disabled = true;
+    rideOpenButton.disabled = true;
+    rideCloseButton.disabled = true;
+    rideOpenButton.classList.remove('is-active');
+    rideCloseButton.classList.add('is-active');
+    updateRideToolButtons();
     return;
   }
 
   const connection = rideConnectionStatus(ride);
   selectedRideName.textContent = `Carousel ${ride.id.split('-')[1]}`;
-  rideOpenToggle.disabled = false;
-  rideOpenToggle.checked = ride.isOpen;
+  rideOpenButton.disabled = false;
+  rideCloseButton.disabled = false;
+  rideOpenButton.classList.toggle('is-active', ride.isOpen);
+  rideCloseButton.classList.toggle('is-active', !ride.isOpen);
 
   if (!ride.isOpen) {
     selectedRideStatus.textContent = 'Closed';
@@ -344,6 +377,7 @@ const updateSelectedRidePanel = () => {
   } else {
     selectedRideStatus.textContent = `${ride.phase.toUpperCase()} · ${ride.riders} riding`;
   }
+  updateRideToolButtons(ride);
   updateRideVisual(ride);
 };
 
@@ -365,11 +399,41 @@ const setTool = (tool: Tool) => {
   toolButtons.forEach((button) => {
     button.classList.toggle('is-active', button.dataset.tool === tool);
   });
+  rideToolButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.rideTool === tool);
+  });
   setStatus(toolStatusLabel(tool));
 };
 
 toolButtons.forEach((button) => {
   button.addEventListener('click', () => setTool(button.dataset.tool as Tool));
+});
+
+rideToolButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const tool = button.dataset.rideTool as 'entrance' | 'exit';
+    const ride = selectedRide();
+    if (!ride) {
+      setStatus('Select a ride first');
+      return;
+    }
+    if (tool === 'entrance' && ride.entranceKey) {
+      setStatus('Entrance already placed');
+      return;
+    }
+    if (tool === 'exit' && ride.exitKey) {
+      setStatus('Exit already placed');
+      return;
+    }
+    setTool(tool);
+    updatePreview();
+  });
+});
+
+queueDirectionButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setQueueBuildDirection(button.dataset.queueDirection as QueueDirection);
+  });
 });
 
 for (let x = -halfMap; x < halfMap; x += 1) {
@@ -636,8 +700,16 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
     exits.set(key, { rideId: ride.id, mesh: gate });
   }
 
-  if (!silent) setStatus(`${kind === 'entrance' ? 'Entrance' : 'Exit'} placed for Carousel ${ride.id.split('-')[1]}`);
   updateSelectedRidePanel();
+  if (!silent) {
+    if (kind === 'entrance' && !ride.exitKey) {
+      setTool('exit');
+      setStatus(`Entrance placed · place Carousel ${ride.id.split('-')[1]} exit`);
+    } else {
+      setTool('select');
+      setStatus(`${kind === 'entrance' ? 'Entrance' : 'Exit'} placed for Carousel ${ride.id.split('-')[1]}`);
+    }
+  }
   return true;
 };
 
@@ -789,7 +861,10 @@ const addCarousel = (coord: GridCoord, silent = false) => {
 
   selectedRideId = id;
   updateSelectedRidePanel();
-  if (!silent) setStatus(`Carousel set installed at ${keyOf(coord.x, coord.z)}`);
+  if (!silent) {
+    setTool('entrance');
+    setStatus(`Carousel set installed · place entrance`);
+  }
   refreshStats();
   return true;
 };
@@ -1611,13 +1686,16 @@ canvas.addEventListener('pointerleave', () => {
   updatePreview();
 });
 
-rideOpenToggle.addEventListener('change', () => {
+const setSelectedRideOpen = (isOpen: boolean) => {
   const ride = selectedRide();
   if (!ride) return;
-  ride.isOpen = rideOpenToggle.checked;
+  ride.isOpen = isOpen;
   updateSelectedRidePanel();
   setStatus(ride.isOpen ? 'Ride opened' : 'Ride closed');
-});
+};
+
+rideOpenButton.addEventListener('click', () => setSelectedRideOpen(true));
+rideCloseButton.addEventListener('click', () => setSelectedRideOpen(false));
 
 continuousRotationToggle.addEventListener('change', () => {
   continuousRotationEnabled = continuousRotationToggle.checked;

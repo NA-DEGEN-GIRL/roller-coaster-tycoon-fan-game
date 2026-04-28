@@ -124,6 +124,32 @@ button {
   background: #fff2de;
 }
 
+.queue-direction {
+  display: grid;
+  grid-template-columns: repeat(4, 40px);
+  gap: 6px;
+}
+
+.direction-button {
+  min-height: 30px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #263844;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.direction-button:hover {
+  border-color: #5f4ea2;
+}
+
+.direction-button.is-active {
+  border-color: #5f4ea2;
+  background: #eee9ff;
+}
+
 .icon {
   position: relative;
   display: block;
@@ -314,6 +340,80 @@ button {
   width: 18px;
   height: 18px;
   accent-color: #27ae60;
+}
+
+.ride-state-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ride-state-button {
+  min-height: 34px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #52646d;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.ride-state-button.open.is-active {
+  border-color: #1f8a49;
+  background: #dff7e8;
+  color: #146335;
+}
+
+.ride-state-button.closed.is-active {
+  border-color: #c0392b;
+  background: #ffe4df;
+  color: #9c2d22;
+}
+
+.ride-state-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.ride-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ride-action {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263844;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.ride-action:hover:not(:disabled) {
+  border-color: #de5b42;
+}
+
+.ride-action.is-active {
+  border-color: #de5b42;
+  background: #fff2de;
+}
+
+.ride-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.ride-action .icon {
+  width: 24px;
+  height: 24px;
 }
 
 .stats div {
