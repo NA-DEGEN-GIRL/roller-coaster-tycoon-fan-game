@@ -124,33 +124,6 @@ button {
   background: #fff2de;
 }
 
-.queue-direction {
-  display: grid;
-  grid-template-columns: repeat(4, 40px);
-  gap: 6px;
-}
-
-.direction-button {
-  min-height: 30px;
-  border: 1px solid rgb(27 42 54 / 18%);
-  border-radius: 7px;
-  background: #ffffff;
-  color: #263844;
-  cursor: pointer;
-  font-size: 1rem;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.direction-button:hover {
-  border-color: #5f4ea2;
-}
-
-.direction-button.is-active {
-  border-color: #5f4ea2;
-  background: #eee9ff;
-}
-
 .speed-control {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
