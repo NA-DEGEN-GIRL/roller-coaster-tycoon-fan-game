@@ -15,6 +15,16 @@ type QueuePath = {
   direction: QueueDirection;
 };
 
+type GateVisual = {
+  mesh: THREE.Group;
+  bar: THREE.Group;
+  openAmount: number;
+};
+
+type RideGate = GateVisual & {
+  rideId: string;
+};
+
 type Guest = {
   mesh: THREE.Group;
   from: string;
@@ -22,7 +32,7 @@ type Guest = {
   progress: number;
   speed: number;
   pause: number;
-  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding';
+  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting';
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
@@ -193,8 +203,8 @@ const queuePaths = new Map<string, QueuePath>();
 const trees = new Map<string, THREE.Group>();
 const rides = new Map<string, Ride>();
 const occupied = new Map<string, string>();
-const entrances = new Map<string, { rideId: string; mesh: THREE.Group }>();
-const exits = new Map<string, { rideId: string; mesh: THREE.Group }>();
+const entrances = new Map<string, RideGate>();
+const exits = new Map<string, RideGate>();
 const guests: Guest[] = [];
 
 let activeTool: Tool = 'select';
@@ -401,7 +411,8 @@ const updateDebugStatus = () => {
   const waiting = guests.filter((guest) => guest.state === 'waiting' && guest.rideId === ride.id).length;
   const queueing = guests.filter((guest) => guest.state === 'queueing' && guest.rideId === ride.id).length;
   const boarding = guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id).length;
-  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
+  const exiting = guests.filter((guest) => guest.state === 'exiting' && guest.rideId === ride.id).length;
+  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · exiting ${exiting} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
 };
 
 const setSimulationSpeed = (speed: number) => {
@@ -643,6 +654,7 @@ const createGate = (kind: 'entrance' | 'exit') => {
   const group = new THREE.Group();
   const material = kind === 'entrance' ? entranceMaterial : exitMaterial;
   const floorMaterial = kind === 'entrance' ? queueMaterial : pathMaterial;
+  const barMaterial = new THREE.MeshStandardMaterial({ color: 0xf0e6cf, roughness: 0.42, metalness: 0.15 });
 
   const base = new THREE.Mesh(new THREE.BoxGeometry(tileSize * 1.02, 0.08, tileSize * 1.02), floorMaterial);
   base.position.y = 0.05;
@@ -675,24 +687,19 @@ const createGate = (kind: 'entrance' | 'exit') => {
   sign.castShadow = true;
   group.add(sign);
 
-  const turnstile = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.09, 0.09, 0.72, 10),
-    new THREE.MeshStandardMaterial({ color: 0xf0e6cf, roughness: 0.42, metalness: 0.2 }),
-  );
-  turnstile.position.set(0.36, 0.48, -0.1);
-  turnstile.castShadow = true;
-  group.add(turnstile);
+  const barPivot = new THREE.Group();
+  barPivot.position.set(-0.58, 0.74, 0.32);
+  group.add(barPivot);
 
-  const armGeometry = new THREE.BoxGeometry(0.54, 0.06, 0.06);
-  for (let i = 0; i < 3; i += 1) {
-    const arm = new THREE.Mesh(
-      armGeometry,
-      new THREE.MeshStandardMaterial({ color: 0xf0e6cf, roughness: 0.42, metalness: 0.2 }),
-    );
-    arm.position.set(0.36, 0.6, -0.1);
-    arm.rotation.y = (i / 3) * Math.PI * 2;
-    group.add(arm);
-  }
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.08, 0.08), barMaterial);
+  bar.position.x = 0.58;
+  bar.castShadow = true;
+  barPivot.add(bar);
+
+  const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 10), barMaterial);
+  hinge.rotation.x = Math.PI / 2;
+  hinge.castShadow = true;
+  barPivot.add(hinge);
 
   const marker = new THREE.Mesh(
     new THREE.ConeGeometry(0.18, 0.28, 3),
@@ -703,7 +710,7 @@ const createGate = (kind: 'entrance' | 'exit') => {
   marker.castShadow = true;
   group.add(marker);
 
-  return group;
+  return { mesh: group, bar: barPivot, openAmount: 0 };
 };
 
 const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false) => {
@@ -713,16 +720,16 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
   const key = keyOf(coord.x, coord.z);
   const gate = createGate(kind);
   const direction = directionToRide(coord, ride);
-  gate.position.copy(worldPos(coord.x, coord.z, 0.04));
-  gate.rotation.y = rotationYForDirection(direction);
-  buildGroup.add(gate);
+  gate.mesh.position.copy(worldPos(coord.x, coord.z, 0.04));
+  gate.mesh.rotation.y = rotationYForDirection(direction);
+  buildGroup.add(gate.mesh);
 
   if (kind === 'entrance') {
     ride.entranceKey = key;
-    entrances.set(key, { rideId: ride.id, mesh: gate });
+    entrances.set(key, { rideId: ride.id, ...gate });
   } else {
     ride.exitKey = key;
-    exits.set(key, { rideId: ride.id, mesh: gate });
+    exits.set(key, { rideId: ride.id, ...gate });
   }
 
   updateSelectedRidePanel();
@@ -1080,6 +1087,17 @@ const exitPathForRide = (ride: Ride) => {
   return adjacentKeys(parseKey(ride.exitKey)).find((key) => paths.has(key)) ?? randomPathKey();
 };
 
+const exitStartPositionForRide = (ride: Ride) => {
+  if (!ride.exitKey) return worldPos(ride.center.x, ride.center.z, 0.12);
+
+  const exitCoord = parseKey(ride.exitKey);
+  const direction = directionToRide(exitCoord, ride);
+  const start = worldPos(exitCoord.x, exitCoord.z, 0.12);
+  start.x += direction.x * tileSize * 0.62;
+  start.z += direction.y * tileSize * 0.62;
+  return start;
+};
+
 const queueKeysForRide = (ride: Ride) => {
   if (!ride.entranceKey) return [];
 
@@ -1172,22 +1190,28 @@ const finishRide = (guest: Guest) => {
     updateSelectedRidePanel();
   }
 
-  const exitKey = ride ? exitPathForRide(ride) : randomPathKey();
-  guest.state = 'walking';
-  guest.rideId = undefined;
+  const exitPathKey = ride ? exitPathForRide(ride) : randomPathKey();
+  const exitStartKey = ride?.exitKey ?? exitPathKey;
+  const exitStart = ride ? exitStartPositionForRide(ride) : undefined;
+  guest.state = ride ? 'exiting' : 'walking';
+  guest.rideId = ride?.id;
   guest.queueKey = undefined;
   guest.queueSlotIndex = undefined;
   guest.queueRoute = undefined;
   guest.queueRouteIndex = undefined;
-  guest.queueMoveStart = undefined;
+  guest.queueMoveStart = exitStart;
   guest.boardingTarget = undefined;
   guest.rideTime = 0;
-  guest.from = exitKey;
-  guest.to = chooseNextPath(exitKey);
+  guest.from = exitStartKey;
+  guest.to = exitPathKey;
   guest.progress = 0;
   guest.pause = 0.35 + Math.random() * 0.8;
   guest.mesh.visible = true;
-  placeGuestAt(guest, exitKey);
+  if (exitStart) {
+    guest.mesh.position.copy(exitStart);
+  } else {
+    placeGuestAt(guest, exitPathKey);
+  }
 };
 
 const completeBoardingGuest = (guest: Guest, ride: Ride) => {
@@ -1346,6 +1370,8 @@ const waitingGuestsForRide = (ride: Ride) =>
 
 const boardingGuestsForRide = (ride: Ride) => guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id);
 
+const exitingGuestsForRide = (ride: Ride) => guests.filter((guest) => guest.state === 'exiting' && guest.rideId === ride.id);
+
 const rideForQueueKey = (queueKey: string) =>
   Array.from(rides.values()).find((ride) => rideConnectionStatus(ride).ready && queueKeysForRide(ride).includes(queueKey));
 
@@ -1385,6 +1411,24 @@ const rotateCarousel = (ride: Ride, delta: number) => {
   ride.rotor.children.forEach((child) => {
     const phase = child.userData.phase as number | undefined;
     if (phase !== undefined) child.position.y = Math.sin(performance.now() * 0.0025 + phase) * 0.08;
+  });
+};
+
+const animateGate = (gate: RideGate | undefined, isOpen: boolean, delta: number) => {
+  if (!gate) return;
+
+  const target = isOpen ? 1 : 0;
+  const step = delta * 5;
+  gate.openAmount += clamp(target - gate.openAmount, -step, step);
+  gate.bar.rotation.y = -gate.openAmount * (Math.PI / 2);
+};
+
+const updateGateAnimations = (delta: number) => {
+  rides.forEach((ride) => {
+    const entrance = ride.entranceKey ? entrances.get(ride.entranceKey) : undefined;
+    const exit = ride.exitKey ? exits.get(ride.exitKey) : undefined;
+    animateGate(entrance, boardingGuestsForRide(ride).length > 0, delta);
+    animateGate(exit, ride.phase === 'unloading' || exitingGuestsForRide(ride).length > 0, delta);
   });
 };
 
@@ -1514,7 +1558,7 @@ const spawnGuest = (startKey?: string) => {
 const resetInvalidGuests = () => {
   if (paths.size === 0) return;
   guests.forEach((guest) => {
-    if (guest.state === 'boarding' || guest.state === 'riding') return;
+    if (guest.state === 'boarding' || guest.state === 'riding' || guest.state === 'exiting') return;
     if ((guest.state === 'queueing' || guest.state === 'waiting') && guest.queueKey && queuePaths.has(guest.queueKey)) return;
     if (!isWalkway(guest.from) || !isWalkway(guest.to)) {
       guest.state = 'walking';
@@ -1644,7 +1688,7 @@ const updateGuests = (delta: number) => {
     guest.progress += delta * guest.speed;
     const from = parseKey(guest.from);
     const to = parseKey(guest.to);
-    const fromPos = worldPos(from.x, from.z, 0.12);
+    const fromPos = guest.queueMoveStart ?? worldPos(from.x, from.z, 0.12);
     const toPos = worldPos(to.x, to.z, 0.12);
     guest.mesh.position.lerpVectors(fromPos, toPos, Math.min(guest.progress, 1));
     guest.mesh.rotation.y = Math.atan2(toPos.x - fromPos.x, toPos.z - fromPos.z);
@@ -1652,7 +1696,12 @@ const updateGuests = (delta: number) => {
     if (guest.progress >= 1) {
       const previous = guest.from;
       guest.from = guest.to;
+      guest.queueMoveStart = undefined;
       placeGuestAt(guest, guest.from);
+      if (guest.state === 'exiting') {
+        guest.state = 'walking';
+        guest.rideId = undefined;
+      }
       if (tryEnterQueueFromPath(guest, guest.from)) return;
       guest.to = chooseNextPath(guest.from, previous);
       guest.progress = 0;
@@ -2014,6 +2063,7 @@ const animate = () => {
 
   if (!isPaused) {
     updateRideSystems(simulationDelta);
+    updateGateAnimations(simulationDelta);
     updateGuests(simulationDelta);
   }
 
