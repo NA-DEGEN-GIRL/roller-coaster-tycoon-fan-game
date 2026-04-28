@@ -1172,37 +1172,42 @@ const updateGuests = (delta: number) => {
 
 const seedPark = () => {
   [
-    [-8, 0],
-    [-7, 0],
-    [-6, 0],
-    [-5, 0],
-    [-4, 0],
-    [-3, 0],
-    [-2, 0],
-    [-1, 0],
-    [0, 0],
-    [1, 0],
-    [3, 0],
-    [4, 0],
-    [5, 0],
-    [6, 0],
-    [-2, -1],
-    [-2, -2],
-    [-2, -3],
-    [3, 1],
+    [-8, 2],
+    [-7, 2],
+    [-6, 2],
+    [-5, 2],
+    [-4, 2],
+    [-3, 2],
+    [-2, 2],
+    [-1, 2],
+    [0, 2],
+    [1, 2],
+    [2, 2],
     [3, 2],
-    [3, 3],
-    [4, 3],
-    [5, 3],
-    [5, -1],
-    [5, -2],
+    [4, 2],
+    [5, 2],
+    [6, 2],
+    [7, 2],
+    [8, 2],
+    [-2, 1],
+    [-2, 0],
+    [-2, -1],
+    [7, -5],
+    [7, -4],
+    [7, -3],
+    [7, -2],
+    [7, -1],
+    [7, 0],
+    [7, 1],
   ].forEach(([x, z]) => addPath({ x, z }, true));
 
-  addCarousel({ x: 3, z: -3 }, true);
-  addRideGate({ x: 2, z: -1 }, 'entrance', true);
-  addRideGate({ x: 5, z: -3 }, 'exit', true);
-  addQueuePath({ x: 2, z: 0 }, true);
-  addQueuePath({ x: 2, z: 1 }, true);
+  addCarousel({ x: 4, z: -5 }, true);
+  addRideGate({ x: 4, z: -3 }, 'entrance', true);
+  addRideGate({ x: 6, z: -5 }, 'exit', true);
+  addQueuePath({ x: 4, z: -2 }, true);
+  addQueuePath({ x: 4, z: -1 }, true);
+  addQueuePath({ x: 4, z: 0 }, true);
+  addQueuePath({ x: 4, z: 1 }, true);
   const ride = selectedRide();
   if (ride) ride.isOpen = true;
 
@@ -1220,7 +1225,7 @@ const seedPark = () => {
   ].forEach(([x, z]) => addTree({ x, z }, true));
 
   for (let i = 0; i < 24; i += 1) spawnGuest();
-  for (let i = 0; i < 4; i += 1) spawnGuest('3,1');
+  for (let i = 0; i < 4; i += 1) spawnGuest('4,2');
   refreshStats();
 };
 
