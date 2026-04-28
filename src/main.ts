@@ -8,6 +8,13 @@ type GridCoord = {
   z: number;
 };
 
+type QueueDirection = 'north' | 'east' | 'south' | 'west';
+
+type QueuePath = {
+  group: THREE.Group;
+  direction: QueueDirection;
+};
+
 type Guest = {
   mesh: THREE.Group;
   from: string;
@@ -126,6 +133,9 @@ const groundMaterials = [
 ];
 const pathMaterial = new THREE.MeshStandardMaterial({ color: 0xc8ad7f, roughness: 0.78 });
 const queueMaterial = new THREE.MeshStandardMaterial({ color: 0x8676c8, roughness: 0.72 });
+const queuePreviewMaterial = new THREE.MeshStandardMaterial({ color: 0x8676c8, roughness: 0.72, transparent: true, opacity: 0.68 });
+const queueArrowMaterial = new THREE.MeshStandardMaterial({ color: 0xf4e9ff, roughness: 0.5 });
+const queueFenceMaterial = new THREE.MeshStandardMaterial({ color: 0x453980, roughness: 0.48 });
 const entranceMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.55 });
 const exitMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.55 });
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
@@ -146,12 +156,23 @@ const selectionMaterial = new THREE.MeshStandardMaterial({
 const tileGeometry = new THREE.BoxGeometry(tileSize, 0.28, tileSize);
 const pathGeometry = new THREE.BoxGeometry(tileSize * 1.02, 0.08, tileSize * 1.02);
 const selectionGeometry = new THREE.BoxGeometry(tileSize * 0.96, 0.1, tileSize * 0.96);
+const queueFenceGeometry = new THREE.BoxGeometry(0.08, 0.32, tileSize * 0.76);
+const queueArrowShape = new THREE.Shape();
+queueArrowShape.moveTo(0, -0.42);
+queueArrowShape.lineTo(-0.24, 0.08);
+queueArrowShape.lineTo(-0.08, 0.08);
+queueArrowShape.lineTo(-0.08, 0.38);
+queueArrowShape.lineTo(0.08, 0.38);
+queueArrowShape.lineTo(0.08, 0.08);
+queueArrowShape.lineTo(0.24, 0.08);
+queueArrowShape.closePath();
+const queueArrowGeometry = new THREE.ShapeGeometry(queueArrowShape);
 const queueTileCapacity = 4;
 const queueSlotIndexes = Array.from({ length: queueTileCapacity }, (_, index) => index);
 
 const tiles: THREE.Mesh[] = [];
 const paths = new Map<string, THREE.Mesh>();
-const queuePaths = new Map<string, THREE.Mesh>();
+const queuePaths = new Map<string, QueuePath>();
 const trees = new Map<string, THREE.Group>();
 const rides = new Map<string, Ride>();
 const occupied = new Map<string, string>();
@@ -160,6 +181,7 @@ const exits = new Map<string, { rideId: string; mesh: THREE.Group }>();
 const guests: Guest[] = [];
 
 let activeTool: Tool = 'select';
+let queueBuildDirection: QueueDirection = 'north';
 let hoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
 let isPaused = false;
@@ -219,8 +241,43 @@ const adjacentKeys = ({ x, z }: GridCoord) => [keyOf(x + 1, z), keyOf(x - 1, z),
 const isWalkway = (key: string) => paths.has(key);
 const isAnyBuiltPath = (key: string) => paths.has(key) || queuePaths.has(key);
 
+const queueDirectionOrder: QueueDirection[] = ['north', 'east', 'south', 'west'];
+const queueDirectionVectors: Record<QueueDirection, GridCoord> = {
+  north: { x: 0, z: -1 },
+  east: { x: 1, z: 0 },
+  south: { x: 0, z: 1 },
+  west: { x: -1, z: 0 },
+};
+const queueDirectionLabels: Record<QueueDirection, string> = {
+  north: 'N',
+  east: 'E',
+  south: 'S',
+  west: 'W',
+};
+
+const keyInDirection = (key: string, direction: QueueDirection) => {
+  const coord = parseKey(key);
+  const vector = queueDirectionVectors[direction];
+  return keyOf(coord.x + vector.x, coord.z + vector.z);
+};
+
+const queueForwardKey = (key: string) => {
+  const queuePath = queuePaths.get(key);
+  return queuePath ? keyInDirection(key, queuePath.direction) : key;
+};
+
+const queueBackKey = (key: string) => {
+  const queuePath = queuePaths.get(key);
+  if (!queuePath) return key;
+  const coord = parseKey(key);
+  const vector = queueDirectionVectors[queuePath.direction];
+  return keyOf(coord.x - vector.x, coord.z - vector.z);
+};
+
 const rideConnectionStatus = (ride: Ride) => {
-  const hasQueueConnection = ride.entranceKey ? adjacentKeys(parseKey(ride.entranceKey)).some((key) => queuePaths.has(key)) : false;
+  const hasQueueConnection = ride.entranceKey
+    ? adjacentKeys(parseKey(ride.entranceKey)).some((key) => queuePaths.has(key) && queueForwardKey(key) === ride.entranceKey)
+    : false;
   const hasExitPath = ride.exitKey ? adjacentKeys(parseKey(ride.exitKey)).some((key) => paths.has(key)) : false;
   return {
     hasQueueConnection,
@@ -240,6 +297,18 @@ const directionToRide = (coord: GridCoord, ride: Ride) => {
 };
 
 const rotationYForDirection = (direction: THREE.Vector2) => Math.atan2(direction.x, direction.y);
+
+const rotationYForQueueDirection = (direction: QueueDirection) => {
+  const vector = queueDirectionVectors[direction];
+  return rotationYForDirection(new THREE.Vector2(vector.x, vector.z));
+};
+
+const rotateQueueBuildDirection = (step: 1 | -1 = 1) => {
+  const currentIndex = queueDirectionOrder.indexOf(queueBuildDirection);
+  const nextIndex = (currentIndex + step + queueDirectionOrder.length) % queueDirectionOrder.length;
+  queueBuildDirection = queueDirectionOrder[nextIndex];
+  setStatus(`Queue direction ${queueDirectionLabels[queueBuildDirection]} · R rotate`);
+};
 
 const updateRideVisual = (ride: Ride) => {
   const connection = rideConnectionStatus(ride);
@@ -406,6 +475,13 @@ const updatePreview = () => {
   selection.material = valid || activeTool === 'bulldoze' ? selectionMaterial : blockedMaterial;
   selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
 
+  if (activeTool === 'queue') {
+    const preview = createQueuePath(queueBuildDirection, true);
+    preview.group.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.02));
+    placementPreview.add(preview.group);
+    selection.visible = false;
+  }
+
   if (cells.length > 1) {
     cells.forEach(({ x, z }) => {
       if (!inBounds(x, z)) return;
@@ -433,17 +509,42 @@ const addPath = (coord: GridCoord, silent = false) => {
   return true;
 };
 
-const addQueuePath = (coord: GridCoord, silent = false) => {
+const createQueuePath = (direction: QueueDirection, preview = false): QueuePath => {
+  const group = new THREE.Group();
+
+  const baseMaterial = preview ? queuePreviewMaterial : queueMaterial;
+  const base = new THREE.Mesh(pathGeometry, baseMaterial);
+  base.position.y = 0.05;
+  base.receiveShadow = true;
+  group.add(base);
+
+  const arrow = new THREE.Mesh(queueArrowGeometry, queueArrowMaterial);
+  arrow.position.y = 0.115;
+  arrow.rotation.x = -Math.PI / 2;
+  group.add(arrow);
+
+  [-0.78, 0.78].forEach((x) => {
+    const fence = new THREE.Mesh(queueFenceGeometry, queueFenceMaterial);
+    fence.position.set(x, 0.26, 0);
+    fence.castShadow = true;
+    fence.receiveShadow = true;
+    group.add(fence);
+  });
+
+  group.rotation.y = rotationYForQueueDirection(direction);
+  return { group, direction };
+};
+
+const addQueuePath = (coord: GridCoord, silent = false, direction = queueBuildDirection) => {
   if (!canPlaceQueue(coord)) return false;
 
   const key = keyOf(coord.x, coord.z);
-  const path = new THREE.Mesh(pathGeometry, queueMaterial);
-  path.position.copy(worldPos(coord.x, coord.z, 0.05));
-  path.receiveShadow = true;
-  buildGroup.add(path);
-  queuePaths.set(key, path);
+  const queuePath = createQueuePath(direction);
+  queuePath.group.position.copy(worldPos(coord.x, coord.z));
+  buildGroup.add(queuePath.group);
+  queuePaths.set(key, queuePath);
 
-  if (!silent) setStatus(`Queue path built at ${key}`);
+  if (!silent) setStatus(`Queue path built at ${key} · ${queueDirectionLabels[direction]}`);
   refreshStats();
   updateSelectedRidePanel();
   return true;
@@ -709,8 +810,7 @@ const removeAt = (coord: GridCoord) => {
 
   const queuePath = queuePaths.get(key);
   if (queuePath) {
-    buildGroup.remove(queuePath);
-    queuePath.geometry.dispose();
+    buildGroup.remove(queuePath.group);
     queuePaths.delete(key);
     resetInvalidGuests();
     refreshStats();
@@ -794,7 +894,7 @@ const queueNeighborsOf = (key: string) => {
     keyOf(x - 1, z),
     keyOf(x, z + 1),
     keyOf(x, z - 1),
-  ].filter((nextKey) => queuePaths.has(nextKey));
+  ].filter((nextKey) => queuePaths.has(nextKey) && queueForwardKey(nextKey) === key);
 };
 
 const randomPathKey = () => {
@@ -820,7 +920,7 @@ const queueKeysForRide = (ride: Ride) => {
 
   const visited = new Set<string>();
   const queue: Array<{ key: string; depth: number }> = adjacentKeys(parseKey(ride.entranceKey))
-    .filter((key) => queuePaths.has(key))
+    .filter((key) => queuePaths.has(key) && queueForwardKey(key) === ride.entranceKey)
     .map((key) => ({ key, depth: 0 }));
   const result: Array<{ key: string; depth: number }> = [];
 
@@ -840,7 +940,13 @@ const queueKeysForRide = (ride: Ride) => {
   return result.sort((a, b) => a.depth - b.depth).map(({ key }) => key);
 };
 
-const queueTailKeysForRide = (ride: Ride) => [...queueKeysForRide(ride)].reverse();
+const queueKeysFromTailToFront = (ride: Ride) => [...queueKeysForRide(ride)].reverse();
+
+const queueTailKeysForRide = (ride: Ride) => {
+  const queueKeys = queueKeysForRide(ride);
+  const tails = queueKeys.filter((key) => !queueKeys.some((candidate) => queueForwardKey(candidate) === key));
+  return tails.reverse();
+};
 
 const queueOccupantsAt = (key: string) =>
   guests.filter((guest) => (guest.state === 'queueing' || guest.state === 'waiting') && guest.queueKey === key);
@@ -978,7 +1084,7 @@ const tryBoardRide = (guest: Guest, key: string) => {
 };
 
 const queueRouteToSlot = (ride: Ride, tailKey: string, targetKey: string) => {
-  const route = queueTailKeysForRide(ride);
+  const route = queueKeysFromTailToFront(ride);
   const startIndex = route.indexOf(tailKey);
   const targetIndex = route.indexOf(targetKey);
   if (startIndex === -1 || targetIndex === -1 || startIndex > targetIndex) return [targetKey];
@@ -1051,7 +1157,7 @@ const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
 
   const queueKey = adjacentKeys(parseKey(pathKey)).find((candidate) => {
     const ride = rideForQueueKey(candidate);
-    return Boolean(ride && queueTailKeysForRide(ride).includes(candidate));
+    return Boolean(ride && queueTailKeysForRide(ride).includes(candidate) && queueBackKey(candidate) === pathKey);
   });
   if (!queueKey) return false;
 
@@ -1530,7 +1636,7 @@ const toolStatusLabel = (tool: Tool) => {
   const labels: Record<Tool, string> = {
     select: 'Select tool selected',
     path: 'Path tool selected',
-    queue: 'Queue path tool selected',
+    queue: `Queue path tool selected · ${queueDirectionLabels[queueBuildDirection]} · R rotate`,
     carousel: 'Carousel prefab selected',
     entrance: 'Entrance tool selected',
     exit: 'Exit tool selected',
@@ -1642,6 +1748,18 @@ canvas.addEventListener(
   },
   { passive: false },
 );
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'BUTTON') return;
+
+  const key = event.key.toLowerCase();
+  if (key !== 'r' || activeTool !== 'queue') return;
+  event.preventDefault();
+  if (event.repeat) return;
+  rotateQueueBuildDirection(event.shiftKey ? -1 : 1);
+  updatePreview();
+});
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
