@@ -161,6 +161,8 @@ const entranceMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, rough
 const exitMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.55 });
 const rideFoundationMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c9b1, roughness: 0.8 });
 const rideBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4f6f8f, roughness: 0.62 });
+const carouselCanopyRedMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.5, side: THREE.DoubleSide });
+const carouselCanopyCreamMaterial = new THREE.MeshStandardMaterial({ color: 0xfff1cf, roughness: 0.54, side: THREE.DoubleSide });
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -811,6 +813,54 @@ const createCarouselRiderVisual = (seatIndex: number) => {
   return group;
 };
 
+const createCarouselCanopy = () => {
+  const canopy = new THREE.Group();
+  const segmentCount = 16;
+  const radius = 2.28;
+  const height = 1.0;
+  const topY = 3.78;
+  const rimY = 2.78;
+
+  for (let i = 0; i < segmentCount; i += 1) {
+    const a0 = (i / segmentCount) * Math.PI * 2;
+    const a1 = ((i + 1) / segmentCount) * Math.PI * 2;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(
+        [
+          0,
+          topY,
+          0,
+          Math.cos(a0) * radius,
+          rimY,
+          Math.sin(a0) * radius,
+          Math.cos(a1) * radius,
+          rimY,
+          Math.sin(a1) * radius,
+        ],
+        3,
+      ),
+    );
+    geometry.computeVertexNormals();
+
+    const panel = new THREE.Mesh(geometry, i % 2 === 0 ? carouselCanopyRedMaterial : carouselCanopyCreamMaterial);
+    panel.castShadow = true;
+    canopy.add(panel);
+  }
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(radius * 0.98, 0.055, 8, 48),
+    new THREE.MeshStandardMaterial({ color: 0xf2c94c, roughness: 0.42 }),
+  );
+  rim.position.y = rimY;
+  rim.rotation.x = Math.PI / 2;
+  rim.castShadow = true;
+  canopy.add(rim);
+
+  return canopy;
+};
+
 const createCarousel = () => {
   const group = new THREE.Group();
   const rotor = new THREE.Group();
@@ -865,13 +915,7 @@ const createCarousel = () => {
   mast.castShadow = true;
   rotor.add(mast);
 
-  const canopy = new THREE.Mesh(
-    new THREE.ConeGeometry(2.28, 1.0, 24),
-    new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.5 }),
-  );
-  canopy.position.y = 3.28;
-  canopy.castShadow = true;
-  rotor.add(canopy);
+  rotor.add(createCarouselCanopy());
 
   const cap = new THREE.Mesh(
     new THREE.SphereGeometry(0.24, 16, 10),
