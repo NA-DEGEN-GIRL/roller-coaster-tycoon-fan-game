@@ -15,13 +15,14 @@ type Guest = {
   progress: number;
   speed: number;
   pause: number;
-  state: 'walking' | 'queueing' | 'waiting' | 'riding';
+  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding';
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
   queueRoute?: string[];
   queueRouteIndex?: number;
   queueMoveStart?: THREE.Vector3;
+  boardingTarget?: THREE.Vector3;
   rideTime: number;
 };
 
@@ -145,8 +146,8 @@ const selectionMaterial = new THREE.MeshStandardMaterial({
 const tileGeometry = new THREE.BoxGeometry(tileSize, 0.28, tileSize);
 const pathGeometry = new THREE.BoxGeometry(tileSize * 1.02, 0.08, tileSize * 1.02);
 const selectionGeometry = new THREE.BoxGeometry(tileSize * 0.96, 0.1, tileSize * 0.96);
-const queueTileCapacity = 3;
-const queueSlotIndexes = [0, 1, 2];
+const queueTileCapacity = 4;
+const queueSlotIndexes = Array.from({ length: queueTileCapacity }, (_, index) => index);
 
 const tiles: THREE.Mesh[] = [];
 const paths = new Map<string, THREE.Mesh>();
@@ -286,7 +287,8 @@ const updateDebugStatus = () => {
 
   const waiting = guests.filter((guest) => guest.state === 'waiting' && guest.rideId === ride.id).length;
   const queueing = guests.filter((guest) => guest.state === 'queueing' && guest.rideId === ride.id).length;
-  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · riders ${ride.riders} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
+  const boarding = guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id).length;
+  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · riders ${ride.riders} · boarding ${boarding} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
 };
 
 const setTool = (tool: Tool) => {
@@ -874,6 +876,7 @@ const finishRide = (guest: Guest) => {
   guest.queueRoute = undefined;
   guest.queueRouteIndex = undefined;
   guest.queueMoveStart = undefined;
+  guest.boardingTarget = undefined;
   guest.rideTime = 0;
   guest.from = exitKey;
   guest.to = chooseNextPath(exitKey);
@@ -883,7 +886,7 @@ const finishRide = (guest: Guest) => {
   placeGuestAt(guest, exitKey);
 };
 
-const boardGuest = (guest: Guest, ride: Ride) => {
+const completeBoardingGuest = (guest: Guest, ride: Ride) => {
   ride.riders += 1;
   guest.state = 'riding';
   guest.rideId = ride.id;
@@ -892,12 +895,39 @@ const boardGuest = (guest: Guest, ride: Ride) => {
   guest.queueRoute = undefined;
   guest.queueRouteIndex = undefined;
   guest.queueMoveStart = undefined;
+  guest.boardingTarget = undefined;
   guest.rideTime = 0;
   guest.progress = 0;
   guest.pause = 0;
   guest.mesh.visible = false;
   updateSelectedRidePanel();
   debug(`Carousel ${ride.id.split('-')[1]} boarded guest (${ride.riders}/8)`);
+};
+
+const boardingTargetForRide = (ride: Ride) => {
+  if (!ride.entranceKey) return worldPos(ride.center.x, ride.center.z, 0.12);
+
+  const entranceCoord = parseKey(ride.entranceKey);
+  const direction = directionToRide(entranceCoord, ride);
+  const target = worldPos(entranceCoord.x, entranceCoord.z, 0.12);
+  target.x += direction.x * tileSize * 0.62;
+  target.z += direction.y * tileSize * 0.62;
+  return target;
+};
+
+const startBoardingGuest = (guest: Guest, ride: Ride) => {
+  guest.state = 'boarding';
+  guest.rideId = ride.id;
+  guest.queueKey = undefined;
+  guest.queueSlotIndex = undefined;
+  guest.queueRoute = undefined;
+  guest.queueRouteIndex = undefined;
+  guest.queueMoveStart = guest.mesh.position.clone();
+  guest.boardingTarget = boardingTargetForRide(ride);
+  guest.progress = 0;
+  guest.pause = 0;
+  guest.mesh.visible = true;
+  debug(`Carousel ${ride.id.split('-')[1]} boarding guest`);
 };
 
 const tryBoardRide = (guest: Guest, key: string) => {
@@ -917,11 +947,6 @@ const tryBoardRide = (guest: Guest, key: string) => {
   if (!ride) return false;
 
   if (guest.state === 'waiting') {
-    if (ride.phase === 'loading' && ride.riders < 8) {
-      boardGuest(guest, ride);
-      compactQueueForRide(ride);
-      return true;
-    }
     return true;
   }
 
@@ -938,11 +963,6 @@ const tryBoardRide = (guest: Guest, key: string) => {
   guest.queueKey = queueSlot.key;
   guest.queueSlotIndex = queueSlot.slotIndex;
   placeGuestInQueueSlot(guest, ride, queueSlot.key, queueSlot.slotIndex);
-
-  if (ride.phase === 'loading' && ride.riders < 8) {
-    boardGuest(guest, ride);
-    return true;
-  }
 
   guest.state = 'waiting';
   guest.rideId = ride.id;
@@ -1019,6 +1039,8 @@ const waitingGuestsForRide = (ride: Ride) =>
       return aIndex - bIndex || (a.queueSlotIndex ?? 0) - (b.queueSlotIndex ?? 0);
     });
 
+const boardingGuestsForRide = (ride: Ride) => guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id);
+
 const rideForQueueKey = (queueKey: string) =>
   Array.from(rides.values()).find((ride) => rideConnectionStatus(ride).ready && queueKeysForRide(ride).includes(queueKey));
 
@@ -1083,12 +1105,15 @@ const updateRideSystems = (delta: number) => {
     }
 
     if (ride.phase === 'loading') {
-      const boardedGuests = waitingGuestsForRide(ride).slice(0, 8 - ride.riders);
-      boardedGuests.forEach((guest) => boardGuest(guest, ride));
+      const remainingSeats = 8 - ride.riders - boardingGuestsForRide(ride).length;
+      const boardedGuests = waitingGuestsForRide(ride).slice(0, remainingSeats);
+      boardedGuests.forEach((guest) => startBoardingGuest(guest, ride));
       if (boardedGuests.length > 0) compactQueueForRide(ride);
       ride.phaseTimer -= delta;
       if (ride.phaseTimer <= 0) {
-        if (ride.riders > 0) {
+        if (boardingGuestsForRide(ride).length > 0) {
+          ride.phaseTimer = 0.35;
+        } else if (ride.riders > 0) {
           setRidePhase(ride, 'running', 8);
         } else {
           setRidePhase(ride, 'loading', 3);
@@ -1144,14 +1169,15 @@ const placeGuestAt = (guest: Guest, key: string) => {
 const queueSlotPosition = (ride: Ride, key: string, slotIndex: number) => {
   const { x, z } = parseKey(key);
   const position = worldPos(x, z, 0.12);
-  const offsets = [0.74, 0.28, -0.18];
+  const slotSpacing = tileSize / queueTileCapacity;
+  const frontOffset = tileSize / 2 - slotSpacing / 2;
+  const offset = frontOffset - slotIndex * slotSpacing;
   const queueOrder = queueKeysForRide(ride);
   const index = queueOrder.indexOf(key);
   const frontKey = index > 0 ? queueOrder[index - 1] : ride.entranceKey;
   const front = frontKey ? parseKey(frontKey) : { x, z: z + 1 };
   const direction = new THREE.Vector2(front.x - x, front.z - z);
   const lineDirection = direction.lengthSq() > 0 ? direction.normalize() : new THREE.Vector2(0, 1);
-  const offset = offsets[slotIndex] ?? 0;
   position.x += lineDirection.x * offset;
   position.z += lineDirection.y * offset;
   return position;
@@ -1183,7 +1209,7 @@ const spawnGuest = (startKey?: string) => {
 const resetInvalidGuests = () => {
   if (paths.size === 0) return;
   guests.forEach((guest) => {
-    if (guest.state === 'riding') return;
+    if (guest.state === 'boarding' || guest.state === 'riding') return;
     if ((guest.state === 'queueing' || guest.state === 'waiting') && guest.queueKey && queuePaths.has(guest.queueKey)) return;
     if (!isWalkway(guest.from) || !isWalkway(guest.to)) {
       guest.state = 'walking';
@@ -1203,6 +1229,28 @@ const resetInvalidGuests = () => {
 
 const updateGuests = (delta: number) => {
   guests.forEach((guest) => {
+    if (guest.state === 'boarding') {
+      const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
+      if (!ride || !guest.queueMoveStart || !guest.boardingTarget) {
+        guest.state = 'walking';
+        guest.rideId = undefined;
+        guest.queueMoveStart = undefined;
+        guest.boardingTarget = undefined;
+        guest.from = randomPathKey();
+        guest.to = chooseNextPath(guest.from);
+        placeGuestAt(guest, guest.from);
+        return;
+      }
+
+      const boardingDistance = guest.queueMoveStart.distanceTo(guest.boardingTarget);
+      const walkingSpeed = guest.speed * tileSize;
+      guest.progress += (delta * walkingSpeed) / Math.max(boardingDistance, 0.001);
+      guest.mesh.position.lerpVectors(guest.queueMoveStart, guest.boardingTarget, Math.min(guest.progress, 1));
+      guest.mesh.rotation.y = Math.atan2(guest.boardingTarget.x - guest.queueMoveStart.x, guest.boardingTarget.z - guest.queueMoveStart.z);
+      if (guest.progress >= 1) completeBoardingGuest(guest, ride);
+      return;
+    }
+
     if (guest.state === 'riding') {
       if (!guest.rideId || !rides.has(guest.rideId)) finishRide(guest);
       return;
@@ -1218,6 +1266,7 @@ const updateGuests = (delta: number) => {
         guest.queueRoute = undefined;
         guest.queueRouteIndex = undefined;
         guest.queueMoveStart = undefined;
+        guest.boardingTarget = undefined;
         guest.from = randomPathKey();
         guest.to = chooseNextPath(guest.from);
         placeGuestAt(guest, guest.from);
@@ -1256,18 +1305,15 @@ const updateGuests = (delta: number) => {
       guest.queueRoute = undefined;
       guest.queueRouteIndex = undefined;
       guest.queueMoveStart = undefined;
+      guest.boardingTarget = undefined;
       placeGuestInQueueSlot(guest, ride, guest.queueKey, guest.queueSlotIndex);
       debug(`Guest reached Carousel ${guest.rideId.split('-')[1]} queue slot`);
-      tryBoardRide(guest, guest.from);
       return;
     }
 
     if (guest.state === 'waiting') {
       const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
-      if (ride && rideConnectionStatus(ride).ready && guest.queueKey && queuePaths.has(guest.queueKey)) {
-        tryBoardRide(guest, guest.from);
-        return;
-      }
+      if (ride && rideConnectionStatus(ride).ready && guest.queueKey && queuePaths.has(guest.queueKey)) return;
 
       guest.state = 'walking';
       guest.rideId = undefined;
@@ -1276,6 +1322,7 @@ const updateGuests = (delta: number) => {
       guest.queueRoute = undefined;
       guest.queueRouteIndex = undefined;
       guest.queueMoveStart = undefined;
+      guest.boardingTarget = undefined;
       guest.from = randomPathKey();
       guest.to = chooseNextPath(guest.from);
       placeGuestAt(guest, guest.from);
