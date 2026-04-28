@@ -1698,7 +1698,6 @@ const animate = () => {
     updateGuests(delta);
   }
 
-  selection.rotation.y += delta * 0.9;
   updateDebugStatus();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
