@@ -7,6 +7,7 @@
 - 기본 뷰는 Three.js orthographic isometric camera를 유지한다.
 - 새 기능은 우선 `src/main.ts` 안에서 작은 프로토타입으로 검증한 뒤, 복잡해지면 모듈로 분리한다.
 - 놀이기구는 prefab 단위로 추가한다. 사용자가 직접 롤러코스터 트랙 조각을 놓는 기능은 현재 범위에서 제외한다.
+- 놀이기구 footprint 바닥과 경계 표현은 공통 규칙이 아니라 prefab별 시각 특성으로 둔다.
 - 문서가 필요한 결정은 `docs/` 아래에 남긴다.
 - 구현 후 `npm run build`로 TypeScript와 Vite 빌드를 확인한다.
 - 원격 저장소가 없으므로 push는 하지 않는다. 중요한 변경은 로컬 Git commit과 `docs/development-log.md`로 추적한다.

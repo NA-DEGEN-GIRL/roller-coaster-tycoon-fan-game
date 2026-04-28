@@ -146,6 +146,8 @@ const queueArrowMaterial = new THREE.MeshStandardMaterial({ color: 0xf4e9ff, rou
 const queueFenceMaterial = new THREE.MeshStandardMaterial({ color: 0x453980, roughness: 0.48 });
 const entranceMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.55 });
 const exitMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.55 });
+const rideFoundationMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c9b1, roughness: 0.8 });
+const rideBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4f6f8f, roughness: 0.62 });
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -164,6 +166,9 @@ const selectionMaterial = new THREE.MeshStandardMaterial({
 const tileGeometry = new THREE.BoxGeometry(tileSize, 0.28, tileSize);
 const pathGeometry = new THREE.BoxGeometry(tileSize * 1.02, 0.08, tileSize * 1.02);
 const selectionGeometry = new THREE.BoxGeometry(tileSize * 0.96, 0.1, tileSize * 0.96);
+const rideFoundationGeometry = new THREE.BoxGeometry(tileSize * 0.98, 0.08, tileSize * 0.98);
+const rideBoundaryLongGeometry = new THREE.BoxGeometry(tileSize * 3.02, 0.16, 0.12);
+const rideBoundaryShortGeometry = new THREE.BoxGeometry(0.12, 0.16, tileSize * 3.02);
 const queueFenceGeometry = new THREE.BoxGeometry(0.08, 0.32, tileSize * 0.76);
 const queueArrowShape = new THREE.Shape();
 queueArrowShape.moveTo(0, -0.42);
@@ -749,6 +754,30 @@ const addTree = (coord: GridCoord, silent = false) => {
 const createCarousel = () => {
   const group = new THREE.Group();
   const rotor = new THREE.Group();
+
+  const foundation = new THREE.Group();
+  for (let x = -1; x <= 1; x += 1) {
+    for (let z = -1; z <= 1; z += 1) {
+      const slab = new THREE.Mesh(rideFoundationGeometry, rideFoundationMaterial);
+      slab.position.set(x * tileSize, 0.04, z * tileSize);
+      slab.receiveShadow = true;
+      foundation.add(slab);
+    }
+  }
+
+  [
+    { geometry: rideBoundaryLongGeometry, position: new THREE.Vector3(0, 0.13, -tileSize * 1.5) },
+    { geometry: rideBoundaryLongGeometry, position: new THREE.Vector3(0, 0.13, tileSize * 1.5) },
+    { geometry: rideBoundaryShortGeometry, position: new THREE.Vector3(-tileSize * 1.5, 0.13, 0) },
+    { geometry: rideBoundaryShortGeometry, position: new THREE.Vector3(tileSize * 1.5, 0.13, 0) },
+  ].forEach(({ geometry, position }) => {
+    const boundary = new THREE.Mesh(geometry, rideBoundaryMaterial);
+    boundary.position.copy(position);
+    boundary.castShadow = true;
+    boundary.receiveShadow = true;
+    foundation.add(boundary);
+  });
+  group.add(foundation);
 
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(2.25, 2.35, 0.36, 32),
