@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RCT Three.js Prototype</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="tool-panel" aria-label="Park tools">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <div>
+            <h1>Park Builder</h1>
+            <p>Prefab park simulation</p>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <span class="section-label">Build</span>
+          <div class="tool-grid" role="group" aria-label="Build tools">
+            <button class="tool is-active" type="button" title="Path" data-tool="path">
+              <span class="icon path-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Queue path" data-tool="queue">
+              <span class="icon queue-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Carousel set" data-tool="carousel">
+              <span class="icon carousel-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Entrance" data-tool="entrance">
+              <span class="icon entrance-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Exit" data-tool="exit">
+              <span class="icon exit-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Trees" data-tool="tree">
+              <span class="icon tree-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Bulldoze" data-tool="bulldoze">
+              <span class="icon bulldoze-icon"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-section ride-panel">
+          <span class="section-label">Selected Ride</span>
+          <div class="ride-card">
+            <div>
+              <strong id="selected-ride-name">No ride selected</strong>
+              <span id="selected-ride-status">Place or click a carousel</span>
+            </div>
+            <label class="toggle-row">
+              <input id="ride-open-toggle" type="checkbox" disabled />
+              <span>Open</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel-section camera-panel">
+          <span class="section-label">Camera</span>
+          <div class="ride-card">
+            <label class="toggle-row">
+              <input id="continuous-rotation-toggle" type="checkbox" />
+              <span>Continuous QE</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel-section stats">
+          <span class="section-label">Park</span>
+          <div><span>Guests</span><strong id="guest-count">0</strong></div>
+          <div><span>Paths</span><strong id="path-count">0</strong></div>
+          <div><span>Queues</span><strong id="queue-count">0</strong></div>
+          <div><span>Rides</span><strong id="ride-count">0</strong></div>
+          <div><span>Rating</span><strong>82%</strong></div>
+        </div>
+      </aside>
+
+      <main class="viewport-wrap">
+        <canvas id="scene" aria-label="Isometric 3D amusement park builder"></canvas>
+        <div class="status-bar">
+          <span id="status-text">Path tool selected</span>
+          <button id="pause-button" type="button">Pause</button>
+        </div>
+        <section class="debug-console" aria-label="Debug console">
+          <div class="debug-header">
+            <strong>DEBUG</strong>
+            <span id="debug-status">Simulation booting</span>
+          </div>
+          <pre id="debug-log"></pre>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
