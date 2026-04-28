@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import './style.css';
 
-type Tool = 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'bulldoze';
+type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'bulldoze';
 
 type GridCoord = {
   x: number;
@@ -159,7 +159,7 @@ const entrances = new Map<string, { rideId: string; mesh: THREE.Group }>();
 const exits = new Map<string, { rideId: string; mesh: THREE.Group }>();
 const guests: Guest[] = [];
 
-let activeTool: Tool = 'path';
+let activeTool: Tool = 'select';
 let hoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
 let isPaused = false;
@@ -296,17 +296,7 @@ const setTool = (tool: Tool) => {
   toolButtons.forEach((button) => {
     button.classList.toggle('is-active', button.dataset.tool === tool);
   });
-
-  const labels: Record<Tool, string> = {
-    path: 'Path tool selected',
-    queue: 'Queue path tool selected',
-    carousel: 'Carousel prefab selected',
-    entrance: 'Entrance tool selected',
-    exit: 'Exit tool selected',
-    tree: 'Tree tool selected',
-    bulldoze: 'Bulldoze tool selected',
-  };
-  setStatus(labels[tool]);
+  setStatus(toolStatusLabel(tool));
 };
 
 toolButtons.forEach((button) => {
@@ -352,6 +342,10 @@ const footprintFor = (tool: Tool, coord: GridCoord) => {
 
 const selectedRide = () => (selectedRideId ? rides.get(selectedRideId) : undefined);
 
+const rideIdAt = (key: string) => occupied.get(key) ?? entrances.get(key)?.rideId ?? exits.get(key)?.rideId ?? null;
+
+const canSelectRideAt = (coord: GridCoord) => rideIdAt(keyOf(coord.x, coord.z)) !== null;
+
 const isBlockedTile = (key: string) =>
   occupied.has(key) || paths.has(key) || queuePaths.has(key) || trees.has(key) || entrances.has(key) || exits.has(key);
 
@@ -380,6 +374,7 @@ const canPlaceRideGate = (coord: GridCoord, kind: 'entrance' | 'exit') => {
 };
 
 const canPlace = (tool: Tool, coord: GridCoord) => {
+  if (tool === 'select') return canSelectRideAt(coord);
   if (tool === 'path') return canPlacePath(coord);
   if (tool === 'queue') return canPlaceQueue(coord);
   if (tool === 'tree') return canPlaceTree(coord);
@@ -395,6 +390,13 @@ const updatePreview = () => {
   clearPreview();
   if (!hoveredTile) {
     selection.visible = false;
+    return;
+  }
+
+  if (activeTool === 'select') {
+    selection.visible = canSelectRideAt(hoveredTile);
+    selection.material = selectionMaterial;
+    selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
     return;
   }
 
@@ -1415,6 +1417,21 @@ const seedPark = () => {
   refreshStats();
 };
 
+const selectRideAt = (coord: GridCoord) => {
+  const rideId = rideIdAt(keyOf(coord.x, coord.z));
+  selectedRideId = rideId;
+  updateSelectedRidePanel();
+  updateDebugStatus();
+
+  if (rideId) {
+    setStatus('Carousel selected');
+    return true;
+  }
+
+  setStatus('Selection cleared');
+  return false;
+};
+
 const handlePointerMove = (event: PointerEvent) => {
   if (isMiddleDragging) {
     panCamera(event.clientX - lastDragX, event.clientY - lastDragY);
@@ -1447,10 +1464,16 @@ const handleBuild = (event: PointerEvent) => {
   if (!hoveredTile) return;
 
   const hoverKey = keyOf(hoveredTile.x, hoveredTile.z);
-  if (activeTool === 'carousel' && occupied.has(hoverKey)) {
-    selectedRideId = occupied.get(hoverKey) ?? null;
-    updateSelectedRidePanel();
-    setStatus('Carousel selected');
+  const clickedRideId = rideIdAt(hoverKey);
+  if (activeTool !== 'bulldoze' && clickedRideId) {
+    if (activeTool !== 'select') setTool('select');
+    selectRideAt(hoveredTile);
+    updatePreview();
+    return;
+  }
+
+  if (activeTool === 'select') {
+    selectRideAt(hoveredTile);
     updatePreview();
     return;
   }
@@ -1503,10 +1526,24 @@ continuousRotationToggle.addEventListener('change', () => {
   setStatus('Continuous QE rotation');
 });
 
+const toolStatusLabel = (tool: Tool) => {
+  const labels: Record<Tool, string> = {
+    select: 'Select tool selected',
+    path: 'Path tool selected',
+    queue: 'Queue path tool selected',
+    carousel: 'Carousel prefab selected',
+    entrance: 'Entrance tool selected',
+    exit: 'Exit tool selected',
+    tree: 'Tree tool selected',
+    bulldoze: 'Bulldoze tool selected',
+  };
+  return labels[tool];
+};
+
 pauseButton.addEventListener('click', () => {
   isPaused = !isPaused;
   pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
-  setStatus(isPaused ? 'Simulation paused' : `${activeTool[0].toUpperCase()}${activeTool.slice(1)} tool selected`);
+  setStatus(isPaused ? 'Simulation paused' : toolStatusLabel(activeTool));
 });
 
 const setViewport = () => {
@@ -1645,7 +1682,7 @@ window.addEventListener('resize', setViewport);
 updateCameraAngle();
 setViewport();
 seedPark();
-setTool('path');
+setTool('select');
 updateSelectedRidePanel();
 
 const clock = new THREE.Clock();

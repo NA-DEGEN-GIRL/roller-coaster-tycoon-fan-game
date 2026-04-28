@@ -19,7 +19,10 @@
         <div class="panel-section">
           <span class="section-label">Build</span>
           <div class="tool-grid" role="group" aria-label="Build tools">
-            <button class="tool is-active" type="button" title="Path" data-tool="path">
+            <button class="tool is-active" type="button" title="Select" data-tool="select">
+              <span class="icon select-icon"></span>
+            </button>
+            <button class="tool" type="button" title="Path" data-tool="path">
               <span class="icon path-icon"></span>
             </button>
             <button class="tool" type="button" title="Queue path" data-tool="queue">
@@ -80,7 +83,7 @@
       <main class="viewport-wrap">
         <canvas id="scene" aria-label="Isometric 3D amusement park builder"></canvas>
         <div class="status-bar">
-          <span id="status-text">Path tool selected</span>
+          <span id="status-text">Select tool selected</span>
           <button id="pause-button" type="button">Pause</button>
         </div>
         <section class="debug-console" aria-label="Debug console">
