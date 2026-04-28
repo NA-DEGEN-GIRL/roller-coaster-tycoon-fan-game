@@ -150,6 +150,32 @@ button {
   background: #eee9ff;
 }
 
+.speed-control {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.speed-button {
+  min-height: 34px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #263844;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.speed-button:hover {
+  border-color: #30475e;
+}
+
+.speed-button.is-active {
+  border-color: #30475e;
+  background: #e7eef4;
+}
+
 .icon {
   position: relative;
   display: block;

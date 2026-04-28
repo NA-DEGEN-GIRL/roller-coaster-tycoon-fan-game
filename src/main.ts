@@ -39,6 +39,8 @@ type Ride = {
   id: string;
   group: THREE.Group;
   rotor: THREE.Group;
+  riderVisuals: THREE.Group[];
+  occupiedSeatIndexes: Set<number>;
   footprint: string[];
   center: GridCoord;
   isOpen: boolean;
@@ -69,6 +71,7 @@ const debugStatus = document.querySelector<HTMLElement>('#debug-status');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const rideToolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-ride-tool]'));
 const queueDirectionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-queue-direction]'));
+const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-speed]'));
 
 if (
   !canvas ||
@@ -182,6 +185,7 @@ queueArrowShape.closePath();
 const queueArrowGeometry = new THREE.ShapeGeometry(queueArrowShape);
 const queueTileCapacity = 4;
 const queueSlotIndexes = Array.from({ length: queueTileCapacity }, (_, index) => index);
+const carouselSeatCount = 8;
 
 const tiles: THREE.Mesh[] = [];
 const paths = new Map<string, THREE.Mesh>();
@@ -198,6 +202,7 @@ let queueBuildDirection: QueueDirection = 'north';
 let hoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
 let isPaused = false;
+let simulationSpeed = 1;
 let rideSerial = 0;
 const quarterYawStep = Math.PI / 2;
 const baseCameraYaw = Math.PI / 4;
@@ -396,7 +401,16 @@ const updateDebugStatus = () => {
   const waiting = guests.filter((guest) => guest.state === 'waiting' && guest.rideId === ride.id).length;
   const queueing = guests.filter((guest) => guest.state === 'queueing' && guest.rideId === ride.id).length;
   const boarding = guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id).length;
-  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · riders ${ride.riders} · boarding ${boarding} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
+  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
+};
+
+const setSimulationSpeed = (speed: number) => {
+  simulationSpeed = speed;
+  speedButtons.forEach((button) => {
+    button.classList.toggle('is-active', Number(button.dataset.speed) === simulationSpeed);
+  });
+  setStatus(`Simulation speed ${simulationSpeed}x`);
+  updateDebugStatus();
 };
 
 const setTool = (tool: Tool) => {
@@ -438,6 +452,12 @@ rideToolButtons.forEach((button) => {
 queueDirectionButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setQueueBuildDirection(button.dataset.queueDirection as QueueDirection);
+  });
+});
+
+speedButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setSimulationSpeed(Number(button.dataset.speed));
   });
 });
 
@@ -751,9 +771,43 @@ const addTree = (coord: GridCoord, silent = false) => {
   return true;
 };
 
+const createCarouselRiderVisual = (seatIndex: number) => {
+  const group = new THREE.Group();
+  const shirtColors = [0x2d9cdb, 0xeb5757, 0x27ae60, 0xbb6bd9, 0xf2994a, 0xf2c94c];
+
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.13, 0.34, 10),
+    new THREE.MeshStandardMaterial({ color: shirtColors[seatIndex % shirtColors.length], roughness: 0.72 }),
+  );
+  body.position.set(-0.02, 1.28, 0);
+  body.castShadow = true;
+  group.add(body);
+
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.62 }),
+  );
+  head.position.set(-0.02, 1.52, 0);
+  head.castShadow = true;
+  group.add(head);
+
+  const armMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.62 });
+  [-0.14, 0.14].forEach((z) => {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.05), armMaterial);
+    arm.position.set(0.08, 1.31, z);
+    arm.rotation.z = -0.35;
+    arm.castShadow = true;
+    group.add(arm);
+  });
+
+  group.visible = false;
+  return group;
+};
+
 const createCarousel = () => {
   const group = new THREE.Group();
   const rotor = new THREE.Group();
+  const riderVisuals: THREE.Group[] = [];
 
   const foundation = new THREE.Group();
   for (let x = -1; x <= 1; x += 1) {
@@ -826,9 +880,9 @@ const createCarousel = () => {
   group.add(statusLight);
 
   const horseColors = [0xf8f4e8, 0xbfd7ea, 0xffd6a5, 0xcddc8a];
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < carouselSeatCount; i += 1) {
     const seat = new THREE.Group();
-    const angle = (i / 8) * Math.PI * 2;
+    const angle = (i / carouselSeatCount) * Math.PI * 2;
     const radius = 1.45;
 
     const pole = new THREE.Mesh(
@@ -857,11 +911,16 @@ const createCarousel = () => {
     seat.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
     seat.rotation.y = -angle + Math.PI / 2;
     seat.userData.phase = i * 0.8;
+
+    const riderVisual = createCarouselRiderVisual(i);
+    seat.add(riderVisual);
+    riderVisuals.push(riderVisual);
+
     rotor.add(seat);
   }
 
   group.add(rotor);
-  return { group, rotor, statusLight };
+  return { group, rotor, statusLight, riderVisuals };
 };
 
 const addCarousel = (coord: GridCoord, silent = false) => {
@@ -869,7 +928,7 @@ const addCarousel = (coord: GridCoord, silent = false) => {
 
   const id = `carousel-${rideSerial}`;
   rideSerial += 1;
-  const { group, rotor, statusLight } = createCarousel();
+  const { group, rotor, statusLight, riderVisuals } = createCarousel();
   group.position.copy(worldPos(coord.x, coord.z, 0.03));
   buildGroup.add(group);
 
@@ -879,6 +938,8 @@ const addCarousel = (coord: GridCoord, silent = false) => {
     id,
     group,
     rotor,
+    riderVisuals,
+    occupiedSeatIndexes: new Set(),
     footprint,
     center: coord,
     isOpen: false,
@@ -1073,10 +1134,41 @@ const queueSlotsForRide = (ride: Ride) =>
     })),
   );
 
+const randomFrom = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
+
+const syncCarouselRiderVisuals = (ride: Ride) => {
+  const targetCount = clamp(Math.round(ride.riders), 0, ride.riderVisuals.length);
+
+  if (targetCount === ride.riderVisuals.length) {
+    ride.riderVisuals.forEach((visual, index) => {
+      ride.occupiedSeatIndexes.add(index);
+      visual.visible = true;
+    });
+    return;
+  }
+
+  while (ride.occupiedSeatIndexes.size > targetCount) {
+    const occupied = [...ride.occupiedSeatIndexes];
+    const index = randomFrom(occupied);
+    ride.occupiedSeatIndexes.delete(index);
+  }
+
+  while (ride.occupiedSeatIndexes.size < targetCount) {
+    const available = ride.riderVisuals.map((_, index) => index).filter((index) => !ride.occupiedSeatIndexes.has(index));
+    const index = randomFrom(available);
+    ride.occupiedSeatIndexes.add(index);
+  }
+
+  ride.riderVisuals.forEach((visual, index) => {
+    visual.visible = ride.occupiedSeatIndexes.has(index);
+  });
+};
+
 const finishRide = (guest: Guest) => {
   const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
   if (ride) {
     ride.riders = Math.max(0, ride.riders - 1);
+    syncCarouselRiderVisuals(ride);
     updateSelectedRidePanel();
   }
 
@@ -1100,6 +1192,7 @@ const finishRide = (guest: Guest) => {
 
 const completeBoardingGuest = (guest: Guest, ride: Ride) => {
   ride.riders += 1;
+  syncCarouselRiderVisuals(ride);
   guest.state = 'riding';
   guest.rideId = ride.id;
   guest.queueKey = undefined;
@@ -1113,7 +1206,7 @@ const completeBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.pause = 0;
   guest.mesh.visible = false;
   updateSelectedRidePanel();
-  debug(`Carousel ${ride.id.split('-')[1]} boarded guest (${ride.riders}/8)`);
+  debug(`Carousel ${ride.id.split('-')[1]} boarded guest (${ride.riders}/${carouselSeatCount})`);
 };
 
 const boardingTargetForRide = (ride: Ride) => {
@@ -1150,7 +1243,7 @@ const tryBoardRide = (guest: Guest, key: string) => {
     .find((candidate) => {
       if (!candidate) return false;
       const ride = rides.get(candidate.rideId);
-      return Boolean(ride && rideConnectionStatus(ride).ready && ride.riders < 8);
+      return Boolean(ride && rideConnectionStatus(ride).ready && ride.riders < carouselSeatCount);
     });
 
   if (!entrance) return false;
@@ -1243,7 +1336,7 @@ const compactQueueForRide = (ride: Ride) => {
 
 const waitingGuestsForRide = (ride: Ride) =>
   guests
-    .filter((guest) => guest.state === 'waiting' && guest.rideId === ride.id && ride.riders < 8)
+    .filter((guest) => guest.state === 'waiting' && guest.rideId === ride.id && ride.riders < carouselSeatCount)
     .sort((a, b) => {
       const order = queueKeysForRide(ride);
       const aIndex = a.queueKey ? order.indexOf(a.queueKey) : Number.MAX_SAFE_INTEGER;
@@ -1317,7 +1410,7 @@ const updateRideSystems = (delta: number) => {
     }
 
     if (ride.phase === 'loading') {
-      const remainingSeats = 8 - ride.riders - boardingGuestsForRide(ride).length;
+      const remainingSeats = carouselSeatCount - ride.riders - boardingGuestsForRide(ride).length;
       const boardedGuests = waitingGuestsForRide(ride).slice(0, remainingSeats);
       boardedGuests.forEach((guest) => startBoardingGuest(guest, ride));
       if (boardedGuests.length > 0) compactQueueForRide(ride);
@@ -1914,13 +2007,14 @@ const clock = new THREE.Clock();
 
 const animate = () => {
   const delta = clock.getDelta();
+  const simulationDelta = Math.min(delta * simulationSpeed, 0.12);
 
   updateKeyboardCamera(delta);
   updateKeyboardRotation(delta);
 
   if (!isPaused) {
-    updateRideSystems(delta);
-    updateGuests(delta);
+    updateRideSystems(simulationDelta);
+    updateGuests(simulationDelta);
   }
 
   updateDebugStatus();
