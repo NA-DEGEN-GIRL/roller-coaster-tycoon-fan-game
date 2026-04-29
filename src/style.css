@@ -43,6 +43,27 @@ button {
   background: rgb(239 243 234 / 94%);
   box-shadow: 8px 0 28px rgb(39 56 47 / 16%);
   overflow-y: auto;
+  scrollbar-color: rgb(48 71 94 / 34%) transparent;
+  scrollbar-width: thin;
+}
+
+.tool-panel::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tool-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tool-panel::-webkit-scrollbar-thumb {
+  border: 2px solid rgb(239 243 234 / 94%);
+  border-radius: 999px;
+  background: rgb(48 71 94 / 34%);
+}
+
+.tool-panel::-webkit-scrollbar-thumb:hover {
+  background: rgb(48 71 94 / 48%);
 }
 
 .brand {
@@ -956,24 +977,98 @@ body.debug-hidden .status-bar {
 
   .tool-panel {
     flex-direction: row;
-    align-items: center;
-    gap: 12px;
-    min-height: 92px;
-    padding: 10px;
+    align-items: stretch;
+    gap: 10px;
+    min-height: 0;
+    padding: 10px 14px;
     border-right: 0;
     border-bottom: 1px solid rgb(25 35 45 / 16%);
     overflow-x: auto;
+    overflow-y: hidden;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+  }
+
+  .tool-panel::-webkit-scrollbar {
+    display: none;
   }
 
   .brand {
-    min-width: 210px;
-    padding: 0 12px 0 0;
+    grid-template-columns: 36px 128px;
+    gap: 10px;
+    min-width: 190px;
+    padding: 0 10px 0 0;
     border-right: 1px solid rgb(28 40 34 / 14%);
     border-bottom: 0;
   }
 
+  .brand-mark {
+    width: 36px;
+  }
+
+  .brand h1 {
+    font-size: 0.92rem;
+  }
+
+  .brand p {
+    display: none;
+  }
+
   .panel-section {
     min-width: max-content;
+    gap: 7px;
+  }
+
+  .section-label {
+    font-size: 0.64rem;
+  }
+
+  .language-panel {
+    min-width: 160px;
+  }
+
+  .language-select {
+    min-height: 34px;
+  }
+
+  .build-panel {
+    min-width: 348px;
+  }
+
+  .build-category-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .build-category-button {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+  }
+
+  .build-popover {
+    position: fixed;
+    top: 74px;
+    left: 10px;
+    width: min(360px, calc(100vw - 20px));
+  }
+
+  .camera-panel .toggle-row {
+    min-width: 230px;
+    min-height: 36px;
+    padding: 0 12px;
+  }
+
+  .environment-panel,
+  .simulation-panel {
+    min-width: 166px;
+  }
+
+  .ride-state-button,
+  .speed-button {
+    min-height: 34px;
   }
 
   .stats {
@@ -988,6 +1083,24 @@ body.debug-hidden .status-bar {
     right: 10px;
     bottom: 142px;
     left: 10px;
+    gap: 10px;
+    padding: 8px 10px;
+  }
+
+  .status-bar span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-actions {
+    gap: 6px;
+  }
+
+  .status-bar button {
+    min-width: 72px;
+    padding: 0 10px;
+    font-size: 0.78rem;
   }
 
   body.debug-hidden .status-bar {
