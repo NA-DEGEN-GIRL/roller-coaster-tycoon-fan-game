@@ -977,10 +977,10 @@ body.debug-hidden .status-bar {
 
   .tool-panel {
     flex-direction: row;
-    align-items: stretch;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
     min-height: 0;
-    padding: 10px 14px 12px;
+    padding: 8px 12px 10px;
     border-right: 0;
     border-bottom: 1px solid rgb(25 35 45 / 16%);
     overflow-x: auto;
@@ -999,20 +999,20 @@ body.debug-hidden .status-bar {
   }
 
   .brand {
-    grid-template-columns: 36px 128px;
-    gap: 10px;
-    min-width: 190px;
-    padding: 0 10px 0 0;
+    grid-template-columns: 34px 92px;
+    gap: 8px;
+    min-width: 148px;
+    padding: 0 8px 0 0;
     border-right: 1px solid rgb(28 40 34 / 14%);
     border-bottom: 0;
   }
 
   .brand-mark {
-    width: 36px;
+    width: 34px;
   }
 
   .brand h1 {
-    font-size: 0.92rem;
+    font-size: 0.84rem;
   }
 
   .brand p {
@@ -1021,23 +1021,31 @@ body.debug-hidden .status-bar {
 
   .panel-section {
     min-width: max-content;
-    gap: 7px;
+    gap: 0;
   }
 
   .section-label {
-    font-size: 0.64rem;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .language-panel {
-    min-width: 160px;
+    min-width: 134px;
   }
 
   .language-select {
-    min-height: 34px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 28px 0 10px;
+    font-size: 0.78rem;
   }
 
   .build-panel {
-    min-width: 348px;
+    min-width: 292px;
   }
 
   .build-category-tabs {
@@ -1046,32 +1054,36 @@ body.debug-hidden .status-bar {
   }
 
   .build-category-button {
-    min-height: 34px;
+    height: 40px;
+    min-height: 40px;
     padding: 0 8px;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
   }
 
   .build-popover {
     position: fixed;
-    top: 74px;
+    top: 58px;
     left: 10px;
     width: min(360px, calc(100vw - 20px));
   }
 
   .camera-panel .toggle-row {
-    min-width: 230px;
-    min-height: 36px;
-    padding: 0 12px;
+    min-width: 180px;
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 0.76rem;
   }
 
   .environment-panel,
   .simulation-panel {
-    min-width: 166px;
+    min-width: 138px;
   }
 
   .ride-state-button,
   .speed-button {
-    min-height: 34px;
+    height: 40px;
+    min-height: 40px;
+    font-size: 0.72rem;
   }
 
   .stats {
