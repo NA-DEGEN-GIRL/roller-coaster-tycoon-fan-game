@@ -27,6 +27,8 @@ export const gameConfig = {
       rideEntrance: 120,
       rideExit: 120,
       firTree: 35,
+      cherryTree: 45,
+      bench: 22,
     },
     refundRates: {
       path: 0.45,
@@ -35,6 +37,8 @@ export const gameConfig = {
       rideEntrance: 0.35,
       rideExit: 0.35,
       firTree: 0.25,
+      cherryTree: 0.25,
+      bench: 0.25,
     },
   },
 } as const;

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import './style.css';
 import { gameConfig } from './gameConfig';
 
-type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'bulldoze';
+type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'cherryTree' | 'bench' | 'bulldoze';
 
 type GridCoord = {
   x: number;
@@ -11,9 +11,10 @@ type GridCoord = {
 
 type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
-type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'ride';
+type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'bench' | 'ride';
 type Language = 'ko' | 'en';
 type GuestIntent = 'wander' | 'ride' | 'leaving';
+type TreeKind = 'fir' | 'cherry';
 
 type QueuePath = {
   group: THREE.Group;
@@ -160,11 +161,19 @@ type TreeInstance = {
   position: THREE.Vector3;
   rotationStep: number;
   scale: number;
+  kind: TreeKind;
+};
+
+type BenchInstance = {
+  group: THREE.Group;
+  coord: GridCoord;
+  edge: QueueEdge;
 };
 
 type PickedBuildObject =
   | { type: 'ride'; rideId: string }
   | { type: 'tree'; treeKey: string }
+  | { type: 'bench'; benchKey: string }
   | { type: 'parkEntrance' };
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
@@ -365,6 +374,27 @@ const treePreviewCanopyMaterial = new THREE.MeshStandardMaterial({
   opacity: 0.5,
   depthWrite: false,
 });
+const cherryPreviewCanopyMaterial = new THREE.MeshStandardMaterial({
+  color: 0xffa7c7,
+  roughness: 0.76,
+  transparent: true,
+  opacity: 0.52,
+  depthWrite: false,
+});
+const benchPreviewMaterial = new THREE.MeshStandardMaterial({
+  color: 0xd89a48,
+  roughness: 0.62,
+  transparent: true,
+  opacity: 0.56,
+  depthWrite: false,
+});
+const benchLegPreviewMaterial = new THREE.MeshStandardMaterial({
+  color: 0x6d4c35,
+  roughness: 0.68,
+  transparent: true,
+  opacity: 0.56,
+  depthWrite: false,
+});
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -415,6 +445,7 @@ const tiles: THREE.Mesh[] = [];
 const paths = new Map<string, THREE.Mesh>();
 const queuePaths = new Map<string, QueuePath>();
 const trees = new Map<string, TreeInstance>();
+const benches = new Map<string, BenchInstance>();
 const rides = new Map<string, Ride>();
 const occupied = new Map<string, string>();
 const entrances = new Map<string, RideGate>();
@@ -523,15 +554,19 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.queue': '대기줄 길',
     'tool.carousel': '회전목마',
     'tool.tree': '전나무',
+    'tool.cherryTree': '벚꽃 나무',
+    'tool.bench': '벤치',
     'tool.bulldoze': '철거',
     'tool.entrance': '입구',
     'tool.exit': '출구',
-    'build.treeScale': '전나무 크기',
+    'build.treeScale': '나무 크기',
     'toolStatus.select': '선택 도구 선택됨',
     'toolStatus.path': '일반 길 도구 선택됨',
     'toolStatus.queue': '대기줄 길 도구 선택됨',
     'toolStatus.carousel': '회전목마 프리팹 선택됨 · R로 90도 회전',
     'toolStatus.tree': '전나무 도구 선택됨',
+    'toolStatus.cherryTree': '벚꽃 나무 도구 선택됨',
+    'toolStatus.bench': '벤치 도구 선택됨 · 일반 길 외곽에 설치',
     'toolStatus.bulldoze': '철거 도구 선택됨',
     'toolStatus.entrance': '입구 도구 선택됨',
     'toolStatus.exit': '출구 도구 선택됨',
@@ -623,12 +658,17 @@ const translations: Record<Language, Record<string, string>> = {
     'status.entrancePlacedNextExit': '입구 설치됨 · {ride} 출구를 설치하세요',
     'status.gatePlaced': '{kind} 설치됨: {ride}',
     'status.treePlanted': '전나무 심음: {key}',
+    'status.cherryTreePlanted': '벚꽃 나무 심음: {key}',
+    'status.benchPlaced': '벤치 설치: {key}',
     'status.carouselInstalled': '회전목마 세트 설치됨 · 입구를 설치하세요',
     'status.pathRemoved': '길 삭제: {key}',
     'status.queueRemoved': '대기줄 삭제: {key}',
     'status.entranceRemoved': '입구 삭제됨',
     'status.exitRemoved': '출구 삭제됨',
     'status.treeRemoved': '전나무 삭제: {key}',
+    'status.cherryTreeRemoved': '벚꽃 나무 삭제: {key}',
+    'status.benchRemoved': '벤치 삭제: {key}',
+    'status.benchNeedsPathEdge': '벤치는 일반 길 외곽에만 설치할 수 있습니다',
     'status.rideRemoved': '놀이기구 삭제됨',
     'status.nothingToRemove': '삭제할 대상 없음',
     'status.carouselSelected': '회전목마 선택됨',
@@ -657,7 +697,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.zoom': '확대 {zoom}%',
     'status.viewRotated': '{key} 방향으로 화면 회전',
     'status.placementRotated': '설치 방향 {degrees}도',
-    'status.treeScale': '전나무 크기 {scale}%',
+    'status.treeScale': '나무 크기 {scale}%',
     'debug.boarded': '{ride} 손님 탑승 완료 ({riders}/{capacity})',
     'debug.boarding': '{ride} 손님 탑승 중',
     'debug.queueFullLeft': '{ride} 대기줄 가득 참; 손님 이탈',
@@ -713,15 +753,19 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.queue': 'Queue path',
     'tool.carousel': 'Carousel',
     'tool.tree': 'Fir tree',
+    'tool.cherryTree': 'Cherry blossom',
+    'tool.bench': 'Bench',
     'tool.bulldoze': 'Bulldoze',
     'tool.entrance': 'Entrance',
     'tool.exit': 'Exit',
-    'build.treeScale': 'Fir tree size',
+    'build.treeScale': 'Tree size',
     'toolStatus.select': 'Select tool selected',
     'toolStatus.path': 'Path tool selected',
     'toolStatus.queue': 'Queue path tool selected',
     'toolStatus.carousel': 'Carousel prefab selected · press R to rotate 90 degrees',
     'toolStatus.tree': 'Fir tree tool selected',
+    'toolStatus.cherryTree': 'Cherry blossom tree tool selected',
+    'toolStatus.bench': 'Bench tool selected · place on an outer path edge',
     'toolStatus.bulldoze': 'Bulldoze tool selected',
     'toolStatus.entrance': 'Entrance tool selected',
     'toolStatus.exit': 'Exit tool selected',
@@ -813,12 +857,17 @@ const translations: Record<Language, Record<string, string>> = {
     'status.entrancePlacedNextExit': 'Entrance placed · place {ride} exit',
     'status.gatePlaced': '{kind} placed for {ride}',
     'status.treePlanted': 'Fir tree planted at {key}',
+    'status.cherryTreePlanted': 'Cherry blossom tree planted at {key}',
+    'status.benchPlaced': 'Bench placed at {key}',
     'status.carouselInstalled': 'Carousel set installed · place entrance',
     'status.pathRemoved': 'Path removed at {key}',
     'status.queueRemoved': 'Queue path removed at {key}',
     'status.entranceRemoved': 'Entrance removed',
     'status.exitRemoved': 'Exit removed',
     'status.treeRemoved': 'Fir tree removed at {key}',
+    'status.cherryTreeRemoved': 'Cherry blossom tree removed at {key}',
+    'status.benchRemoved': 'Bench removed at {key}',
+    'status.benchNeedsPathEdge': 'Benches can only be placed on an outer path edge',
     'status.rideRemoved': 'Ride removed',
     'status.nothingToRemove': 'Nothing to remove',
     'status.carouselSelected': 'Carousel selected',
@@ -847,7 +896,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.zoom': 'Zoom {zoom}%',
     'status.viewRotated': 'View rotated {key}',
     'status.placementRotated': 'Placement rotation {degrees} degrees',
-    'status.treeScale': 'Fir tree scale {scale}%',
+    'status.treeScale': 'Tree scale {scale}%',
     'debug.boarded': '{ride} boarded guest ({riders}/{capacity})',
     'debug.boarding': '{ride} boarding guest',
     'debug.queueFullLeft': '{ride} queue full; guest left',
@@ -1855,6 +1904,48 @@ const treesInTile = (key: string) => [...trees.values()].filter((tree) => keyOf(
 
 const hasTreeInTile = (key: string) => treesInTile(key).length > 0;
 
+const benchesInTile = (key: string) => [...benches.values()].filter((bench) => keyOf(bench.coord.x, bench.coord.z) === key);
+
+const treeKindForTool = (tool: Tool): TreeKind | null => {
+  if (tool === 'tree') return 'fir';
+  if (tool === 'cherryTree') return 'cherry';
+  return null;
+};
+
+const isTreeTool = (tool: Tool) => treeKindForTool(tool) !== null;
+
+const benchKeyFor = (coord: GridCoord, edge: QueueEdge) => `${keyOf(coord.x, coord.z)}:${edge}`;
+
+const edgeNeighborKey = (coord: GridCoord, edge: QueueEdge) => {
+  const vector = queueDirectionVectors[edge];
+  return keyOf(coord.x + vector.x, coord.z + vector.z);
+};
+
+const benchEdgeForPlacement = (coord: GridCoord): QueueEdge => {
+  const center = worldPos(coord.x, coord.z);
+  const point = hoveredWorldPoint ?? center;
+  const dx = point.x - center.x;
+  const dz = point.z - center.z;
+  if (Math.abs(dx) > Math.abs(dz)) return dx > 0 ? 'east' : 'west';
+  return dz > 0 ? 'south' : 'north';
+};
+
+const benchRotationForEdge = (edge: QueueEdge) => {
+  if (edge === 'north') return 0;
+  if (edge === 'south') return Math.PI;
+  if (edge === 'east') return -Math.PI / 2;
+  return Math.PI / 2;
+};
+
+const benchPositionForEdge = (coord: GridCoord, edge: QueueEdge) => {
+  const position = worldPos(coord.x, coord.z, 0.12);
+  const offset = tileSize * 0.43;
+  const vector = queueDirectionVectors[edge];
+  position.x += vector.x * offset;
+  position.z += vector.z * offset;
+  return position;
+};
+
 const isBlockedTile = (key: string) =>
   occupied.has(key) ||
   paths.has(key) ||
@@ -1898,6 +1989,22 @@ const canPlaceTreeAt = (coord: GridCoord, position = treePlacementPosition(coord
   return [...trees.values()].every((tree) => tree.position.distanceTo(position) >= treeCollisionRadiusForScale(scale) + treeCollisionRadiusForScale(tree.scale) * 0.72);
 };
 
+const canPlaceBenchAt = (coord: GridCoord, edge = benchEdgeForPlacement(coord)) => {
+  const key = keyOf(coord.x, coord.z);
+  const neighborKey = edgeNeighborKey(coord, edge);
+  const neighbor = parseKey(neighborKey);
+  const neighborBlocked =
+    inBounds(neighbor.x, neighbor.z) &&
+    (paths.has(neighborKey) ||
+      queuePaths.has(neighborKey) ||
+      entrances.has(neighborKey) ||
+      exits.has(neighborKey) ||
+      occupied.has(neighborKey) ||
+      hasTreeInTile(neighborKey) ||
+      neighborKey === parkEntrance?.outsideKey);
+  return paths.has(key) && !benches.has(benchKeyFor(coord, edge)) && !neighborBlocked;
+};
+
 const canPlaceCarousel = (coord: GridCoord) =>
   footprintFor('carousel', coord).every(({ x, z }) => {
     const key = keyOf(x, z);
@@ -1917,13 +2024,14 @@ const canPlace = (tool: Tool, coord: GridCoord) => {
   if (tool === 'select') return canSelectRideAt(coord) || canSelectParkEntranceAt(coord);
   if (tool === 'path') return canPlacePath(coord);
   if (tool === 'queue') return canPlaceQueue(coord) || canConnectQueueEntryFromPath(keyOf(coord.x, coord.z));
-  if (tool === 'tree') return canPlaceTreeAt(coord);
+  if (isTreeTool(tool)) return canPlaceTreeAt(coord);
+  if (tool === 'bench') return canPlaceBenchAt(coord);
   if (tool === 'carousel') return canPlaceCarousel(coord);
   if (tool === 'entrance') return canPlaceRideGate(coord, 'entrance');
   if (tool === 'exit') return canPlaceRideGate(coord, 'exit');
 
   const key = keyOf(coord.x, coord.z);
-  return isAnyBuiltPath(key) || occupied.has(key) || hasTreeInTile(key) || entrances.has(key) || exits.has(key);
+  return isAnyBuiltPath(key) || occupied.has(key) || hasTreeInTile(key) || benchesInTile(key).length > 0 || entrances.has(key) || exits.has(key);
 };
 
 const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
@@ -1933,6 +2041,7 @@ const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
   if (entrances.has(key)) return 'entrance';
   if (exits.has(key)) return 'exit';
   if (hasTreeInTile(key)) return 'tree';
+  if (benchesInTile(key).length > 0) return 'bench';
   if (occupied.has(key)) return 'ride';
   return null;
 };
@@ -1989,23 +2098,65 @@ const createCarouselPlacementPreview = (valid: boolean) => {
   return group;
 };
 
-const createTreePlacementPreview = (valid: boolean) => {
+const createTreePlacementPreview = (kind: TreeKind, valid: boolean) => {
   const group = new THREE.Group();
   const trunkMaterial = valid ? treePreviewTrunkMaterial : blockedMaterial;
-  const canopyMaterial = valid ? treePreviewCanopyMaterial : blockedMaterial;
+  const canopyMaterial = valid ? (kind === 'cherry' ? cherryPreviewCanopyMaterial : treePreviewCanopyMaterial) : blockedMaterial;
 
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.9, 8), trunkMaterial);
   trunk.position.y = 0.45;
   group.add(trunk);
 
-  const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.78, 1.5, 8), canopyMaterial);
-  canopy.position.y = 1.4;
-  group.add(canopy);
+  if (kind === 'fir') {
+    const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.78, 1.5, 8), canopyMaterial);
+    canopy.position.y = 1.4;
+    group.add(canopy);
+  } else {
+    [
+      { x: 0, z: 0, r: 0.58, y: 1.28 },
+      { x: -0.34, z: 0.08, r: 0.43, y: 1.18 },
+      { x: 0.34, z: 0.08, r: 0.43, y: 1.18 },
+      { x: 0, z: -0.32, r: 0.4, y: 1.18 },
+    ].forEach(({ x, z, r, y }) => {
+      const blossom = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), canopyMaterial);
+      blossom.position.set(x, y, z);
+      group.add(blossom);
+    });
+  }
 
   const frontMarker = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 3), valid ? carouselPreviewAccentMaterial : blockedMaterial);
   frontMarker.position.set(0, 0.08, 0.42);
   frontMarker.rotation.x = Math.PI / 2;
   group.add(frontMarker);
+
+  return group;
+};
+
+const createBenchVisual = (valid = true, preview = false) => {
+  const group = new THREE.Group();
+  const woodMaterial = preview ? (valid ? benchPreviewMaterial : blockedMaterial) : new THREE.MeshStandardMaterial({ color: 0xb8793f, roughness: 0.66 });
+  const legMaterial = preview ? (valid ? benchLegPreviewMaterial : blockedMaterial) : new THREE.MeshStandardMaterial({ color: 0x5d3d2a, roughness: 0.7 });
+
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.1, 0.34), woodMaterial);
+  seat.position.y = 0.36;
+  seat.castShadow = !preview;
+  seat.receiveShadow = true;
+  group.add(seat);
+
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.34, 0.08), woodMaterial);
+  back.position.set(0, 0.58, -0.22);
+  back.rotation.x = -0.12;
+  back.castShadow = !preview;
+  group.add(back);
+
+  [-0.46, 0.46].forEach((x) => {
+    [-0.12, 0.16].forEach((z) => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.36, 0.08), legMaterial);
+      leg.position.set(x, 0.18, z);
+      leg.castShadow = !preview;
+      group.add(leg);
+    });
+  });
 
   return group;
 };
@@ -2030,15 +2181,28 @@ const updatePreview = () => {
   selection.material = valid || activeTool === 'bulldoze' ? selectionMaterial : blockedMaterial;
   selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
 
-  if (activeTool === 'tree') {
+  const treeKind = treeKindForTool(activeTool);
+  if (treeKind) {
     const position = treePlacementPosition(hoveredTile);
     const validTree = canPlaceTreeAt(hoveredTile, position);
-    const preview = createTreePlacementPreview(validTree);
+    const preview = createTreePlacementPreview(treeKind, validTree);
     preview.position.copy(position);
     preview.rotation.y = placementRotationY();
     preview.scale.setScalar(treePlacementScale);
     placementPreview.add(preview);
     selection.visible = false;
+    return;
+  }
+
+  if (activeTool === 'bench') {
+    const edge = benchEdgeForPlacement(hoveredTile);
+    const validBench = canPlaceBenchAt(hoveredTile, edge);
+    const preview = createBenchVisual(validBench, true);
+    preview.position.copy(benchPositionForEdge(hoveredTile, edge));
+    preview.rotation.y = benchRotationForEdge(edge);
+    placementPreview.add(preview);
+    selection.visible = paths.has(keyOf(hoveredTile.x, hoveredTile.z));
+    selection.material = validBench ? selectionMaterial : blockedMaterial;
     return;
   }
 
@@ -2522,7 +2686,7 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
   return true;
 };
 
-const createTree = (position: THREE.Vector3) => {
+const createTree = (kind: TreeKind, position: THREE.Vector3) => {
   const group = new THREE.Group();
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.14, 0.18, 0.9, 8),
@@ -2532,36 +2696,58 @@ const createTree = (position: THREE.Vector3) => {
   trunk.castShadow = true;
   group.add(trunk);
 
-  const canopy = new THREE.Mesh(
-    new THREE.ConeGeometry(0.78, 1.5, 8),
-    new THREE.MeshStandardMaterial({ color: Math.random() > 0.5 ? 0x2f7d4a : 0x3f9355, roughness: 0.82 }),
-  );
-  canopy.position.y = 1.4;
-  canopy.castShadow = true;
-  group.add(canopy);
+  if (kind === 'fir') {
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(0.78, 1.5, 8),
+      new THREE.MeshStandardMaterial({ color: Math.random() > 0.5 ? 0x2f7d4a : 0x3f9355, roughness: 0.82 }),
+    );
+    canopy.position.y = 1.4;
+    canopy.castShadow = true;
+    group.add(canopy);
+  } else {
+    const blossomColors = [0xffb3cb, 0xff9fbe, 0xf7c6d8, 0xffd6e5];
+    [
+      { x: 0, z: 0, r: 0.58, y: 1.28 },
+      { x: -0.34, z: 0.08, r: 0.43, y: 1.18 },
+      { x: 0.34, z: 0.08, r: 0.43, y: 1.18 },
+      { x: 0, z: -0.32, r: 0.4, y: 1.18 },
+    ].forEach(({ x, z, r, y }, index) => {
+      const blossom = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 14, 9),
+        new THREE.MeshStandardMaterial({ color: blossomColors[index % blossomColors.length], roughness: 0.78 }),
+      );
+      blossom.position.set(x, y, z);
+      blossom.castShadow = true;
+      group.add(blossom);
+    });
+  }
 
   group.position.copy(position);
   return group;
 };
 
-const addTree = (coord: GridCoord, silent = false, rotationStep = placementRotationStep) => {
+const treeBuildCost = (kind: TreeKind) => (kind === 'cherry' ? gameConfig.economy.buildCosts.cherryTree : gameConfig.economy.buildCosts.firTree);
+const treeRefundRate = (kind: TreeKind) => (kind === 'cherry' ? gameConfig.economy.refundRates.cherryTree : gameConfig.economy.refundRates.firTree);
+const treeToolLabel = (kind: TreeKind) => (kind === 'cherry' ? 'tool.cherryTree' : 'tool.tree');
+
+const addTree = (coord: GridCoord, silent = false, rotationStep = placementRotationStep, kind: TreeKind = treeKindForTool(activeTool) ?? 'fir') => {
   const position = treePlacementPosition(coord);
   const scale = treePlacementScale;
   if (!canPlaceTreeAt(coord, position, scale)) return false;
-  const cost = gameConfig.economy.buildCosts.firTree * scale;
-  if (!silent && !chargeBuildCost(cost, 'tool.tree')) return false;
+  const cost = treeBuildCost(kind) * scale;
+  if (!silent && !chargeBuildCost(cost, treeToolLabel(kind))) return false;
 
   const key = keyOf(coord.x, coord.z);
   const treeId = `tree-${++treeSerial}`;
-  const tree = createTree(position);
+  const tree = createTree(kind, position);
   tree.rotation.y = placementRotationY(rotationStep);
   tree.scale.setScalar(scale);
   tree.traverse((child) => {
     child.userData.treeKey = treeId;
   });
   buildGroup.add(tree);
-  trees.set(treeId, { group: tree, coord, position: position.clone(), rotationStep, scale });
-  if (!silent) setStatus(t('status.treePlanted', { key }));
+  trees.set(treeId, { group: tree, coord, position: position.clone(), rotationStep, scale, kind });
+  if (!silent) setStatus(t(kind === 'cherry' ? 'status.cherryTreePlanted' : 'status.treePlanted', { key }));
   return true;
 };
 
@@ -2577,9 +2763,56 @@ const removeTree = (treeKey: string) => {
 
   buildGroup.remove(tree.group);
   trees.delete(treeKey);
-  refundBuildCost(gameConfig.economy.buildCosts.firTree * tree.scale * gameConfig.economy.refundRates.firTree, 'tool.tree');
-  setStatus(t('status.treeRemoved', { key: keyOf(tree.coord.x, tree.coord.z) }));
+  refundBuildCost(treeBuildCost(tree.kind) * tree.scale * treeRefundRate(tree.kind), treeToolLabel(tree.kind));
+  setStatus(t(tree.kind === 'cherry' ? 'status.cherryTreeRemoved' : 'status.treeRemoved', { key: keyOf(tree.coord.x, tree.coord.z) }));
   return 'tree' as const;
+};
+
+const nearestBenchInTile = (coord: GridCoord) => {
+  const key = keyOf(coord.x, coord.z);
+  const point = hoveredWorldPoint ?? worldPos(coord.x, coord.z);
+  return benchesInTile(key).sort((a, b) => a.group.position.distanceTo(point) - b.group.position.distanceTo(point))[0];
+};
+
+const addBench = (coord: GridCoord, silent = false, edge = benchEdgeForPlacement(coord)) => {
+  if (!canPlaceBenchAt(coord, edge)) {
+    if (!silent) setStatus(t('status.benchNeedsPathEdge'));
+    return false;
+  }
+
+  if (!silent && !chargeBuildCost(gameConfig.economy.buildCosts.bench, 'tool.bench')) return false;
+
+  const key = benchKeyFor(coord, edge);
+  const bench = createBenchVisual();
+  bench.position.copy(benchPositionForEdge(coord, edge));
+  bench.rotation.y = benchRotationForEdge(edge);
+  bench.traverse((child) => {
+    child.userData.benchKey = key;
+  });
+  buildGroup.add(bench);
+  benches.set(key, { group: bench, coord, edge });
+  if (!silent) setStatus(t('status.benchPlaced', { key: keyOf(coord.x, coord.z) }));
+  return true;
+};
+
+const removeBench = (benchKey: string) => {
+  const bench = benches.get(benchKey);
+  if (!bench) return null;
+
+  buildGroup.remove(bench.group);
+  benches.delete(benchKey);
+  refundBuildCost(gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench, 'tool.bench');
+  setStatus(t('status.benchRemoved', { key: keyOf(bench.coord.x, bench.coord.z) }));
+  return 'bench' as const;
+};
+
+const removeBenchesOnPath = (pathKey: string) => {
+  benchesInTile(pathKey).forEach((bench) => {
+    const key = benchKeyFor(bench.coord, bench.edge);
+    buildGroup.remove(bench.group);
+    benches.delete(key);
+    refundBuildCost(gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench, 'tool.bench');
+  });
 };
 
 const createCarouselRiderVisual = (seatIndex: number) => {
@@ -2891,15 +3124,21 @@ const removeRideById = (rideId: string) => {
 };
 
 const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
+  const key = keyOf(coord.x, coord.z);
+  if (allowedTarget === 'bench') {
+    const bench = nearestBenchInTile(coord);
+    return bench ? removeBench(benchKeyFor(bench.coord, bench.edge)) : null;
+  }
+
   const target = bulldozeTargetAt(coord);
   if (allowedTarget && target !== allowedTarget) return null;
 
-  const key = keyOf(coord.x, coord.z);
   const path = paths.get(key);
   if (path) {
     buildGroup.remove(path);
     path.geometry.dispose();
     paths.delete(key);
+    removeBenchesOnPath(key);
     queuePaths.forEach((queuePath) => {
       if (queuePath.entryPathKey === key) queuePath.entryPathKey = undefined;
     });
@@ -4344,6 +4583,18 @@ const seedPark = () => {
     [6, 2],
   ].forEach(([x, z]) => addTree({ x, z }, true));
 
+  [
+    [-8, -4],
+    [-4, 5],
+    [2, -7],
+  ].forEach(([x, z]) => addTree({ x, z }, true, placementRotationStep, 'cherry'));
+
+  [
+    { coord: { x: -6, z: 2 }, edge: 'north' },
+    { coord: { x: -2, z: 0 }, edge: 'east' },
+    { coord: { x: 7, z: -1 }, edge: 'east' },
+  ].forEach(({ coord, edge }) => addBench(coord, true, edge as QueueEdge));
+
   createAudioTestZones();
 
   const initialGuestPathKeys = [
@@ -4446,6 +4697,9 @@ const buildObjectAtPointer = (event: PointerEvent): PickedBuildObject | undefine
       const treeKey = object.userData.treeKey as string | undefined;
       if (treeKey && trees.has(treeKey)) return { type: 'tree', treeKey };
 
+      const benchKey = object.userData.benchKey as string | undefined;
+      if (benchKey && benches.has(benchKey)) return { type: 'bench', benchKey };
+
       const rideId = object.userData.rideId as string | undefined;
       if (rideId && rides.has(rideId)) return { type: 'ride', rideId };
 
@@ -4523,6 +4777,8 @@ const handleBuild = (event: PointerEvent) => {
     const removedTarget =
       clickedBuildObject.type === 'tree'
         ? removeTree(clickedBuildObject.treeKey)
+        : clickedBuildObject.type === 'bench'
+          ? removeBench(clickedBuildObject.benchKey)
         : clickedBuildObject.type === 'ride'
           ? removeRideById(clickedBuildObject.rideId)
           : null;
@@ -4600,7 +4856,9 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
-  if (activeTool === 'tree') addTree(hoveredTile);
+  const treeKind = treeKindForTool(activeTool);
+  if (treeKind) addTree(hoveredTile, false, placementRotationStep, treeKind);
+  if (activeTool === 'bench') addBench(hoveredTile);
   if (activeTool === 'carousel') addCarousel(hoveredTile);
   if (activeTool === 'entrance') addRideGate(hoveredTile, 'entrance');
   if (activeTool === 'exit') addRideGate(hoveredTile, 'exit');
@@ -4880,7 +5138,7 @@ window.addEventListener('keydown', (event) => {
   if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
 
   if (event.code !== 'KeyR' && event.key.toLowerCase() !== 'r') return;
-  if (activeTool !== 'carousel' && activeTool !== 'tree') return;
+  if (activeTool !== 'carousel' && !isTreeTool(activeTool)) return;
   event.preventDefault();
   if (event.repeat) return;
 
@@ -4892,7 +5150,7 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
   if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
-  if (activeTool !== 'tree') return;
+  if (!isTreeTool(activeTool)) return;
   if (event.key !== '[' && event.key !== ']') return;
   event.preventDefault();
   if (event.repeat) return;

@@ -393,6 +393,55 @@ button {
   content: "";
 }
 
+.cherry-tree-icon::before {
+  position: absolute;
+  left: 11px;
+  bottom: 2px;
+  width: 5px;
+  height: 10px;
+  border-radius: 2px;
+  background: #6d4c35;
+  content: "";
+}
+
+.cherry-tree-icon::after {
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 20px;
+  height: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 40%, #ffd9e7 0 18%, transparent 19%),
+    radial-gradient(circle at 68% 36%, #ffc2d7 0 22%, transparent 23%),
+    radial-gradient(circle at 48% 65%, #f59fbe 0 26%, transparent 27%),
+    #ffb3cb;
+  content: "";
+}
+
+.bench-icon::before {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 18px;
+  height: 5px;
+  border-radius: 2px;
+  background: #b8793f;
+  box-shadow: 0 7px 0 #b8793f;
+  content: "";
+}
+
+.bench-icon::after {
+  position: absolute;
+  left: 6px;
+  bottom: 3px;
+  width: 14px;
+  height: 10px;
+  border-right: 3px solid #5d3d2a;
+  border-left: 3px solid #5d3d2a;
+  content: "";
+}
+
 .bulldoze-icon::before {
   position: absolute;
   left: 3px;
