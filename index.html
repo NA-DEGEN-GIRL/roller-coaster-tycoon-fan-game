@@ -93,6 +93,10 @@
                   <span class="icon bench-icon"></span>
                   <span data-i18n="tool.bench">벤치</span>
                 </button>
+                <button class="tool" type="button" title="가로등" data-i18n-title="tool.lamp" data-tool="lamp">
+                  <span class="icon lamp-icon"></span>
+                  <span data-i18n="tool.lamp">가로등</span>
+                </button>
               </div>
             </div>
           </div>
@@ -169,6 +173,14 @@
           </div>
         </div>
 
+        <div class="panel-section environment-panel">
+          <span class="section-label" data-i18n="section.environment">환경</span>
+          <div class="ride-state-toggle" aria-label="시간대 선택" data-i18n-aria="aria.timeOfDay">
+            <button id="day-button" class="ride-state-button is-active" type="button" data-i18n="environment.day">낮</button>
+            <button id="night-button" class="ride-state-button" type="button" data-i18n="environment.night">밤</button>
+          </div>
+        </div>
+
         <div class="panel-section simulation-panel">
           <span class="section-label" data-i18n="section.simulation">시뮬레이션</span>
           <div class="speed-control" aria-label="시뮬레이션 속도" data-i18n-aria="aria.simulationSpeed">
@@ -223,7 +235,10 @@
         </section>
         <div class="status-bar">
           <span id="status-text">선택 도구 선택됨</span>
-          <button id="pause-button" type="button">일시정지</button>
+          <div class="status-actions">
+            <button id="debug-toggle-button" type="button">디버그 숨김</button>
+            <button id="pause-button" type="button">일시정지</button>
+          </div>
         </div>
         <section class="debug-console" aria-label="디버그 콘솔" data-i18n-aria="aria.debugConsole">
           <div class="debug-header">

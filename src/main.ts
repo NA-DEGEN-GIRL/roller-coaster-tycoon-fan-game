@@ -3,7 +3,7 @@ import './style.css';
 import { gameConfig } from './gameConfig';
 import { createGuestMesh, setGuestPose as setGuestMeshPose } from './guestModel';
 
-type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'cherryTree' | 'bench' | 'bulldoze';
+type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'cherryTree' | 'bench' | 'lamp' | 'bulldoze';
 
 type GridCoord = {
   x: number;
@@ -12,8 +12,9 @@ type GridCoord = {
 
 type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
-type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'bench' | 'ride';
+type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'bench' | 'lamp' | 'ride';
 type Language = 'ko' | 'en';
+type TimeOfDay = 'day' | 'night';
 type GuestIntent = 'wander' | 'ride' | 'rest' | 'leaving';
 type TreeKind = 'fir' | 'cherry';
 type GuestSitPhase = 'sittingDown' | 'seated' | 'standingUp';
@@ -183,10 +184,19 @@ type BenchInstance = {
   occupantId?: number;
 };
 
+type LampInstance = {
+  group: THREE.Group;
+  light: THREE.PointLight;
+  glow: THREE.Mesh;
+  coord: GridCoord;
+  edge: QueueEdge;
+};
+
 type PickedBuildObject =
   | { type: 'ride'; rideId: string }
   | { type: 'tree'; treeKey: string }
   | { type: 'bench'; benchKey: string }
+  | { type: 'lamp'; lampKey: string }
   | { type: 'parkEntrance' };
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
@@ -214,7 +224,11 @@ const rideTicketPriceValue = document.querySelector<HTMLElement>('#ride-ticket-p
 const placeEntranceButton = document.querySelector<HTMLButtonElement>('#place-entrance-button');
 const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-button');
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
+const dayButton = document.querySelector<HTMLButtonElement>('#day-button');
+const nightButton = document.querySelector<HTMLButtonElement>('#night-button');
 const languageSelect = document.querySelector<HTMLSelectElement>('#language-select');
+const debugToggleButton = document.querySelector<HTMLButtonElement>('#debug-toggle-button');
+const debugConsole = document.querySelector<HTMLElement>('.debug-console');
 const debugLog = document.querySelector<HTMLElement>('#debug-log');
 const debugStatus = document.querySelector<HTMLElement>('#debug-status');
 const guestWindow = document.querySelector<HTMLElement>('#guest-window');
@@ -267,7 +281,11 @@ if (
   !placeEntranceButton ||
   !placeExitButton ||
   !continuousRotationToggle ||
+  !dayButton ||
+  !nightButton ||
   !languageSelect ||
+  !debugToggleButton ||
+  !debugConsole ||
   !debugLog ||
   !debugStatus ||
   !guestWindow ||
@@ -319,7 +337,22 @@ sun.shadow.camera.right = 42;
 sun.shadow.camera.top = 42;
 sun.shadow.camera.bottom = -42;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xeaf8ff, 0x6a8a55, 1.45));
+const hemisphereLight = new THREE.HemisphereLight(0xeaf8ff, 0x6a8a55, 1.45);
+scene.add(hemisphereLight);
+
+const starGroup = new THREE.Group();
+starGroup.visible = false;
+scene.add(starGroup);
+
+const starMaterial = new THREE.MeshBasicMaterial({ color: 0xf7fbff, transparent: true, opacity: 0.82 });
+const starGeometry = new THREE.SphereGeometry(0.045, 6, 4);
+for (let i = 0; i < 120; i += 1) {
+  const star = new THREE.Mesh(starGeometry, starMaterial);
+  const angle = Math.random() * Math.PI * 2;
+  const radius = 42 + Math.random() * 42;
+  star.position.set(Math.cos(angle) * radius, 22 + Math.random() * 26, Math.sin(angle) * radius);
+  starGroup.add(star);
+}
 
 const world = new THREE.Group();
 scene.add(world);
@@ -408,6 +441,21 @@ const benchLegPreviewMaterial = new THREE.MeshStandardMaterial({
   opacity: 0.56,
   depthWrite: false,
 });
+const lampPreviewMaterial = new THREE.MeshStandardMaterial({
+  color: 0xf4d35e,
+  roughness: 0.38,
+  emissive: 0x6a5200,
+  transparent: true,
+  opacity: 0.62,
+  depthWrite: false,
+});
+const lampPostPreviewMaterial = new THREE.MeshStandardMaterial({
+  color: 0x33404a,
+  roughness: 0.62,
+  transparent: true,
+  opacity: 0.58,
+  depthWrite: false,
+});
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -459,6 +507,7 @@ const paths = new Map<string, THREE.Mesh>();
 const queuePaths = new Map<string, QueuePath>();
 const trees = new Map<string, TreeInstance>();
 const benches = new Map<string, BenchInstance>();
+const lamps = new Map<string, LampInstance>();
 const rides = new Map<string, Ride>();
 const occupied = new Map<string, string>();
 const entrances = new Map<string, RideGate>();
@@ -532,6 +581,8 @@ const lerpAngle = (from: number, to: number, amount: number) => {
 };
 const debugLines: string[] = [];
 let language: Language = 'ko';
+let timeOfDay: TimeOfDay = new URLSearchParams(window.location.search).get('time') === 'night' ? 'night' : 'day';
+let debugConsoleVisible = true;
 
 const audioTestZones: AudioTestZone[] = [
   { center: { x: -8, z: -8 }, amount: 1.4, radius: tileSize * 3.2, dummyGuests: 4, color: 0x68c7d9, labelKo: '군중 낮음', labelEn: 'Low Crowd' },
@@ -550,6 +601,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.rideMusicPreset': '회전목마 음악 선택',
     'aria.rideTools': '선택한 놀이기구 배치 도구',
     'aria.parkEntranceState': '공원 입구 운영 상태',
+    'aria.timeOfDay': '시간대 선택',
     'aria.simulationSpeed': '시뮬레이션 속도',
     'aria.scene': '아이소메트릭 3D 놀이공원 빌더',
     'aria.selectedGuest': '선택한 손님',
@@ -562,6 +614,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.selectedRide': '선택한 놀이기구',
     'section.parkEntrance': '공원 입구',
     'section.camera': '카메라',
+    'section.environment': '환경',
     'section.simulation': '시뮬레이션',
     'section.economy': '경제 설정',
     'section.park': '공원',
@@ -577,6 +630,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.tree': '전나무',
     'tool.cherryTree': '벚꽃 나무',
     'tool.bench': '벤치',
+    'tool.lamp': '가로등',
     'tool.bulldoze': '철거',
     'tool.entrance': '입구',
     'tool.exit': '출구',
@@ -588,6 +642,7 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.tree': '전나무 도구 선택됨',
     'toolStatus.cherryTree': '벚꽃 나무 도구 선택됨',
     'toolStatus.bench': '벤치 도구 선택됨 · 일반 길 외곽에 설치',
+    'toolStatus.lamp': '가로등 도구 선택됨 · 일반 길 외곽 또는 대기줄 안쪽에 설치',
     'toolStatus.bulldoze': '철거 도구 선택됨',
     'toolStatus.entrance': '입구 도구 선택됨',
     'toolStatus.exit': '출구 도구 선택됨',
@@ -615,6 +670,8 @@ const translations: Record<Language, Record<string, string>> = {
     'parkEntrance.open': '오픈',
     'parkEntrance.close': '클로즈',
     'parkEntrance.admissionFee': '입장료',
+    'environment.day': '낮',
+    'environment.night': '밤',
     'parkEntrance.openStatus': '공원 오픈 · 손님 입장 중',
     'parkEntrance.closedStatus': '공원 클로즈 · 손님 퇴장 중',
     'economy.parkAdmission': '공원 입장료',
@@ -664,6 +721,8 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.thoughtSitting': '벤치에서 쉬는 중',
     'pause.pause': '일시정지',
     'pause.resume': '재개',
+    'debug.hide': '디버그 숨김',
+    'debug.show': '디버그 표시',
     'debug.noRide': '손님 {guests}명 · 선택한 놀이기구 없음',
     'debug.status': '{ride} · {phase} · {speed}x · 탑승 {riders} · 탑승중 {boarding} · 하차중 {exiting} · 대기줄이동 {queueing} · 대기 {waiting} · 길찾기 {seeking} · 타이머 {timer}s',
     'debug.booting': '시뮬레이션 시작 중',
@@ -684,6 +743,10 @@ const translations: Record<Language, Record<string, string>> = {
     'status.treePlanted': '전나무 심음: {key}',
     'status.cherryTreePlanted': '벚꽃 나무 심음: {key}',
     'status.benchPlaced': '벤치 설치: {key}',
+    'status.lampPlaced': '가로등 설치: {key}',
+    'status.lampPlacedWithBenchReplace': '벤치 자동 철거 후 가로등 설치: 설치 {cost} · 벤치 환급 {refund} · 순비용 {net}',
+    'status.lampPreviewCost': '가로등 설치 예정: 설치 {cost}',
+    'status.lampPreviewReplace': '가로등 설치 예정: 설치 {cost} · 벤치 환급 {refund} · 순비용 {net}',
     'status.carouselInstalled': '회전목마 세트 설치됨 · 입구를 설치하세요',
     'status.pathRemoved': '길 삭제: {key}',
     'status.queueRemoved': '대기줄 삭제: {key}',
@@ -692,7 +755,9 @@ const translations: Record<Language, Record<string, string>> = {
     'status.treeRemoved': '전나무 삭제: {key}',
     'status.cherryTreeRemoved': '벚꽃 나무 삭제: {key}',
     'status.benchRemoved': '벤치 삭제: {key}',
+    'status.lampRemoved': '가로등 삭제: {key}',
     'status.benchNeedsPathEdge': '벤치는 일반 길 외곽에만 설치할 수 있습니다',
+    'status.lampNeedsPathEdge': '가로등은 일반 길 외곽 또는 대기줄 안쪽에만 설치할 수 있습니다',
     'status.rideRemoved': '놀이기구 삭제됨',
     'status.nothingToRemove': '삭제할 대상 없음',
     'status.carouselSelected': '회전목마 선택됨',
@@ -722,6 +787,10 @@ const translations: Record<Language, Record<string, string>> = {
     'status.viewRotated': '{key} 방향으로 화면 회전',
     'status.placementRotated': '설치 방향 {degrees}도',
     'status.treeScale': '나무 크기 {scale}%',
+    'status.dayMode': '낮 모드',
+    'status.nightMode': '밤 모드 · 가로등과 놀이기구 조명 켜짐',
+    'status.debugShown': '디버그 콘솔 표시',
+    'status.debugHidden': '디버그 콘솔 숨김',
     'debug.boarded': '{ride} 손님 탑승 완료 ({riders}/{capacity})',
     'debug.boarding': '{ride} 손님 탑승 중',
     'debug.queueFullLeft': '{ride} 대기줄 가득 참; 손님 이탈',
@@ -753,6 +822,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.rideMusicPreset': 'Carousel music selection',
     'aria.rideTools': 'Selected ride placement tools',
     'aria.parkEntranceState': 'Park entrance operating state',
+    'aria.timeOfDay': 'Time of day',
     'aria.simulationSpeed': 'Simulation speed',
     'aria.scene': 'Isometric 3D amusement park builder',
     'aria.selectedGuest': 'Selected guest',
@@ -765,6 +835,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.selectedRide': 'Selected Ride',
     'section.parkEntrance': 'Park Entrance',
     'section.camera': 'Camera',
+    'section.environment': 'Environment',
     'section.simulation': 'Simulation',
     'section.economy': 'Economy',
     'section.park': 'Park',
@@ -780,6 +851,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.tree': 'Fir tree',
     'tool.cherryTree': 'Cherry blossom',
     'tool.bench': 'Bench',
+    'tool.lamp': 'Lamp',
     'tool.bulldoze': 'Bulldoze',
     'tool.entrance': 'Entrance',
     'tool.exit': 'Exit',
@@ -791,6 +863,7 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.tree': 'Fir tree tool selected',
     'toolStatus.cherryTree': 'Cherry blossom tree tool selected',
     'toolStatus.bench': 'Bench tool selected · place on an outer path edge',
+    'toolStatus.lamp': 'Lamp tool selected · place on an outer path edge or inside a queue',
     'toolStatus.bulldoze': 'Bulldoze tool selected',
     'toolStatus.entrance': 'Entrance tool selected',
     'toolStatus.exit': 'Exit tool selected',
@@ -818,6 +891,8 @@ const translations: Record<Language, Record<string, string>> = {
     'parkEntrance.open': 'Open',
     'parkEntrance.close': 'Close',
     'parkEntrance.admissionFee': 'Admission',
+    'environment.day': 'Day',
+    'environment.night': 'Night',
     'parkEntrance.openStatus': 'Park open · guests entering',
     'parkEntrance.closedStatus': 'Park closed · guests leaving',
     'economy.parkAdmission': 'Park admission',
@@ -867,6 +942,8 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.thoughtSitting': 'Resting on a bench',
     'pause.pause': 'Pause',
     'pause.resume': 'Resume',
+    'debug.hide': 'Hide debug',
+    'debug.show': 'Show debug',
     'debug.noRide': 'Guests {guests} · no ride selected',
     'debug.status': '{ride} · {phase} · {speed}x · riders {riders} · boarding {boarding} · exiting {exiting} · queueing {queueing} · waiting {waiting} · seeking {seeking} · timer {timer}s',
     'debug.booting': 'Simulation booting',
@@ -887,6 +964,10 @@ const translations: Record<Language, Record<string, string>> = {
     'status.treePlanted': 'Fir tree planted at {key}',
     'status.cherryTreePlanted': 'Cherry blossom tree planted at {key}',
     'status.benchPlaced': 'Bench placed at {key}',
+    'status.lampPlaced': 'Lamp placed at {key}',
+    'status.lampPlacedWithBenchReplace': 'Bench auto-removed, lamp placed: build {cost} · bench refund {refund} · net {net}',
+    'status.lampPreviewCost': 'Lamp preview: build {cost}',
+    'status.lampPreviewReplace': 'Lamp preview: build {cost} · bench refund {refund} · net {net}',
     'status.carouselInstalled': 'Carousel set installed · place entrance',
     'status.pathRemoved': 'Path removed at {key}',
     'status.queueRemoved': 'Queue path removed at {key}',
@@ -895,7 +976,9 @@ const translations: Record<Language, Record<string, string>> = {
     'status.treeRemoved': 'Fir tree removed at {key}',
     'status.cherryTreeRemoved': 'Cherry blossom tree removed at {key}',
     'status.benchRemoved': 'Bench removed at {key}',
+    'status.lampRemoved': 'Lamp removed at {key}',
     'status.benchNeedsPathEdge': 'Benches can only be placed on an outer path edge',
+    'status.lampNeedsPathEdge': 'Lamps can only be placed on an outer path edge or inside a queue',
     'status.rideRemoved': 'Ride removed',
     'status.nothingToRemove': 'Nothing to remove',
     'status.carouselSelected': 'Carousel selected',
@@ -925,6 +1008,10 @@ const translations: Record<Language, Record<string, string>> = {
     'status.viewRotated': 'View rotated {key}',
     'status.placementRotated': 'Placement rotation {degrees} degrees',
     'status.treeScale': 'Tree scale {scale}%',
+    'status.dayMode': 'Day mode',
+    'status.nightMode': 'Night mode · lamps and ride lights on',
+    'status.debugShown': 'Debug console shown',
+    'status.debugHidden': 'Debug console hidden',
     'debug.boarded': '{ride} boarded guest ({riders}/{capacity})',
     'debug.boarding': '{ride} boarding guest',
     'debug.queueFullLeft': '{ride} queue full; guest left',
@@ -1375,6 +1462,12 @@ const updateCrowdAudio = () => {
   });
 };
 
+function syncDebugConsoleVisibility() {
+  debugConsole!.hidden = !debugConsoleVisible;
+  document.body.classList.toggle('debug-hidden', !debugConsoleVisible);
+  debugToggleButton!.textContent = t(debugConsoleVisible ? 'debug.hide' : 'debug.show');
+}
+
 const applyStaticTranslations = () => {
   document.documentElement.lang = language;
   document.title = language === 'ko' ? 'RCT Three.js 프로토타입' : 'RCT Three.js Prototype';
@@ -1389,6 +1482,7 @@ const applyStaticTranslations = () => {
     element.setAttribute('aria-label', t(element.dataset.i18nAria ?? ''));
   });
   pauseButton.textContent = isPaused ? t('pause.resume') : t('pause.pause');
+  syncDebugConsoleVisibility();
 };
 
 const setStatus = (message: string) => {
@@ -1678,6 +1772,67 @@ const updateRideVisual = (ride: Ride) => {
   ride.statusLight.material = connection.ready ? openMaterial : closedMaterial;
 };
 
+const updateLampVisuals = () => {
+  const night = timeOfDay === 'night';
+  lamps.forEach((lamp) => {
+    lamp.light.intensity = night ? 1.15 : 0;
+    const glowMaterial = lamp.glow.material as THREE.MeshBasicMaterial;
+    glowMaterial.opacity = night ? 0.22 : 0;
+  });
+};
+
+const updateCarouselNightLights = () => {
+  const night = timeOfDay === 'night';
+  carouselCanopyRedMaterial.emissive.set(night ? 0x7a160f : 0x000000);
+  carouselCanopyRedMaterial.emissiveIntensity = night ? 0.46 : 0;
+  carouselCanopyCreamMaterial.emissive.set(night ? 0xffd27a : 0x000000);
+  carouselCanopyCreamMaterial.emissiveIntensity = night ? 0.58 : 0;
+  rides.forEach((ride) => {
+    ride.group.traverse((object) => {
+      if (object.userData.carouselNightLight && object instanceof THREE.PointLight) {
+        object.intensity = night ? 0.95 : 0;
+      }
+
+      if (object.userData.carouselBulb && object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
+        object.material.emissiveIntensity = night ? 1.6 : 0.15;
+      }
+
+      if (object.userData.carouselFloorBulb && object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
+        object.material.emissiveIntensity = night ? 1.25 : 0.12;
+      }
+
+      if (object.userData.carouselPlatformGlow && object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
+        object.material.opacity = night ? 0.16 : 0;
+      }
+    });
+  });
+};
+
+const applyTimeOfDay = () => {
+  const night = timeOfDay === 'night';
+  const background = night ? 0x111827 : 0xa7c9d4;
+  renderer.setClearColor(background, 1);
+  scene.background = new THREE.Color(background);
+  scene.fog = new THREE.Fog(night ? 0x111827 : 0xa7c9d4, night ? 46 : 70, night ? 92 : 120);
+  sun.intensity = night ? 0.22 : 2.5;
+  sun.color.set(night ? 0x9fb7ff : 0xffffff);
+  hemisphereLight.intensity = night ? 0.42 : 1.45;
+  hemisphereLight.color.set(night ? 0x9fb7ff : 0xeaf8ff);
+  hemisphereLight.groundColor.set(night ? 0x162033 : 0x6a8a55);
+  starGroup.visible = night;
+  document.body.classList.toggle('is-night', night);
+  dayButton.classList.toggle('is-active', !night);
+  nightButton.classList.toggle('is-active', night);
+  updateLampVisuals();
+  updateCarouselNightLights();
+};
+
+const setTimeOfDay = (nextTime: TimeOfDay) => {
+  timeOfDay = nextTime;
+  applyTimeOfDay();
+  setStatus(t(nextTime === 'night' ? 'status.nightMode' : 'status.dayMode'));
+};
+
 const updateRideToolButtons = (ride?: Ride) => {
   placeEntranceButton.disabled = !ride || Boolean(ride.entranceKey);
   placeExitButton.disabled = !ride || Boolean(ride.exitKey);
@@ -1935,6 +2090,7 @@ const treesInTile = (key: string) => [...trees.values()].filter((tree) => keyOf(
 const hasTreeInTile = (key: string) => treesInTile(key).length > 0;
 
 const benchesInTile = (key: string) => [...benches.values()].filter((bench) => keyOf(bench.coord.x, bench.coord.z) === key);
+const lampsInTile = (key: string) => [...lamps.values()].filter((lamp) => keyOf(lamp.coord.x, lamp.coord.z) === key);
 
 const treeKindForTool = (tool: Tool): TreeKind | null => {
   if (tool === 'tree') return 'fir';
@@ -1945,6 +2101,7 @@ const treeKindForTool = (tool: Tool): TreeKind | null => {
 const isTreeTool = (tool: Tool) => treeKindForTool(tool) !== null;
 
 const benchKeyFor = (coord: GridCoord, edge: QueueEdge) => `${keyOf(coord.x, coord.z)}:${edge}`;
+const lampKeyFor = (coord: GridCoord, edge: QueueEdge) => `${keyOf(coord.x, coord.z)}:${edge}`;
 
 const edgeNeighborKey = (coord: GridCoord, edge: QueueEdge) => {
   const vector = queueDirectionVectors[edge];
@@ -1973,6 +2130,21 @@ const benchPositionForEdge = (coord: GridCoord, edge: QueueEdge) => {
   const vector = queueDirectionVectors[edge];
   position.x += vector.x * offset;
   position.z += vector.z * offset;
+  return position;
+};
+
+const lampPositionForEdge = (coord: GridCoord, edge: QueueEdge) => {
+  const vector = queueDirectionVectors[edge];
+  if (queuePaths.has(keyOf(coord.x, coord.z))) {
+    const position = worldPos(coord.x, coord.z, 0.12);
+    position.x += vector.x * tileSize * 0.36;
+    position.z += vector.z * tileSize * 0.36;
+    return position;
+  }
+
+  const position = benchPositionForEdge(coord, edge);
+  position.x += vector.x * tileSize * 0.03;
+  position.z += vector.z * tileSize * 0.03;
   return position;
 };
 
@@ -2043,7 +2215,26 @@ const canPlaceBenchAt = (coord: GridCoord, edge = benchEdgeForPlacement(coord)) 
       occupied.has(neighborKey) ||
       hasTreeInTile(neighborKey) ||
       neighborKey === parkEntrance?.outsideKey);
-  return paths.has(key) && !benches.has(benchKeyFor(coord, edge)) && !neighborBlocked;
+  return paths.has(key) && !benches.has(benchKeyFor(coord, edge)) && !lamps.has(lampKeyFor(coord, edge)) && !neighborBlocked;
+};
+
+const canPlaceLampAt = (coord: GridCoord, edge = benchEdgeForPlacement(coord)) => {
+  const key = keyOf(coord.x, coord.z);
+  if (lamps.has(lampKeyFor(coord, edge))) return false;
+  if (queuePaths.has(key)) return true;
+
+  const neighborKey = edgeNeighborKey(coord, edge);
+  const neighbor = parseKey(neighborKey);
+  const neighborBlocked =
+    inBounds(neighbor.x, neighbor.z) &&
+    (paths.has(neighborKey) ||
+      queuePaths.has(neighborKey) ||
+      entrances.has(neighborKey) ||
+      exits.has(neighborKey) ||
+      occupied.has(neighborKey) ||
+      hasTreeInTile(neighborKey) ||
+      neighborKey === parkEntrance?.outsideKey);
+  return paths.has(key) && !neighborBlocked;
 };
 
 const canPlaceCarousel = (coord: GridCoord) =>
@@ -2067,12 +2258,13 @@ const canPlace = (tool: Tool, coord: GridCoord) => {
   if (tool === 'queue') return canPlaceQueue(coord) || canConnectQueueEntryFromPath(keyOf(coord.x, coord.z));
   if (isTreeTool(tool)) return canPlaceTreeAt(coord);
   if (tool === 'bench') return canPlaceBenchAt(coord);
+  if (tool === 'lamp') return canPlaceLampAt(coord);
   if (tool === 'carousel') return canPlaceCarousel(coord);
   if (tool === 'entrance') return canPlaceRideGate(coord, 'entrance');
   if (tool === 'exit') return canPlaceRideGate(coord, 'exit');
 
   const key = keyOf(coord.x, coord.z);
-  return isAnyBuiltPath(key) || occupied.has(key) || hasTreeInTile(key) || benchesInTile(key).length > 0 || entrances.has(key) || exits.has(key);
+  return isAnyBuiltPath(key) || occupied.has(key) || hasTreeInTile(key) || benchesInTile(key).length > 0 || lampsInTile(key).length > 0 || entrances.has(key) || exits.has(key);
 };
 
 const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
@@ -2083,6 +2275,7 @@ const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
   if (exits.has(key)) return 'exit';
   if (hasTreeInTile(key)) return 'tree';
   if (benchesInTile(key).length > 0) return 'bench';
+  if (lampsInTile(key).length > 0) return 'lamp';
   if (occupied.has(key)) return 'ride';
   return null;
 };
@@ -2202,6 +2395,62 @@ const createBenchVisual = (valid = true, preview = false) => {
   return group;
 };
 
+const createLampVisual = (valid = true, preview = false) => {
+  const group = new THREE.Group();
+  const postMaterial = preview ? (valid ? lampPostPreviewMaterial : blockedMaterial) : new THREE.MeshStandardMaterial({ color: 0x33404a, roughness: 0.55, metalness: 0.15 });
+  const bulbMaterial = preview
+    ? valid
+      ? lampPreviewMaterial
+      : blockedMaterial
+    : new THREE.MeshStandardMaterial({ color: 0xfff2a8, emissive: 0xf4d35e, emissiveIntensity: timeOfDay === 'night' ? 1.5 : 0.2, roughness: 0.32 });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.12, 10), postMaterial);
+  base.position.y = 0.08;
+  base.castShadow = !preview;
+  group.add(base);
+
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 1.32, 10), postMaterial);
+  post.position.y = 0.78;
+  post.castShadow = !preview;
+  group.add(post);
+
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.14, 12), postMaterial);
+  cap.position.y = 1.48;
+  cap.castShadow = !preview;
+  group.add(cap);
+
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), bulbMaterial);
+  bulb.position.y = 1.34;
+  bulb.castShadow = !preview;
+  group.add(bulb);
+
+  const light = new THREE.PointLight(0xffe08a, preview ? 0 : timeOfDay === 'night' ? 1.15 : 0, 7.5, 2.2);
+  light.position.set(0, 1.36, 0);
+  light.castShadow = !preview;
+  group.add(light);
+
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.44, 16, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffdf7a, transparent: true, opacity: preview ? 0.18 : timeOfDay === 'night' ? 0.22 : 0, depthWrite: false }),
+  );
+  glow.position.y = 1.35;
+  group.add(glow);
+
+  return { group, light, glow };
+};
+
+const lampBuildCost = () => gameConfig.economy.buildCosts.lamp;
+const benchRefundAmount = () => gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench;
+
+const lampPreviewStatus = (coord: GridCoord, edge: QueueEdge) => {
+  const cost = lampBuildCost();
+  const refund = benches.has(benchKeyFor(coord, edge)) ? benchRefundAmount() : 0;
+  if (refund > 0) {
+    return t('status.lampPreviewReplace', { cost: formatMoney(cost), refund: formatMoney(refund), net: formatMoney(Math.max(0, cost - refund)) });
+  }
+  return t('status.lampPreviewCost', { cost: formatMoney(cost) });
+};
+
 const updatePreview = () => {
   clearPreview();
   if (!hoveredTile) {
@@ -2244,6 +2493,19 @@ const updatePreview = () => {
     placementPreview.add(preview);
     selection.visible = paths.has(keyOf(hoveredTile.x, hoveredTile.z));
     selection.material = validBench ? selectionMaterial : blockedMaterial;
+    return;
+  }
+
+  if (activeTool === 'lamp') {
+    const edge = benchEdgeForPlacement(hoveredTile);
+    const validLamp = canPlaceLampAt(hoveredTile, edge);
+    const { group: preview } = createLampVisual(validLamp, true);
+    preview.position.copy(lampPositionForEdge(hoveredTile, edge));
+    preview.rotation.y = benchRotationForEdge(edge);
+    placementPreview.add(preview);
+    selection.visible = paths.has(keyOf(hoveredTile.x, hoveredTile.z)) || queuePaths.has(keyOf(hoveredTile.x, hoveredTile.z));
+    selection.material = validLamp ? selectionMaterial : blockedMaterial;
+    if (validLamp) setStatus(lampPreviewStatus(hoveredTile, edge));
     return;
   }
 
@@ -2815,6 +3077,12 @@ const nearestBenchInTile = (coord: GridCoord) => {
   return benchesInTile(key).sort((a, b) => a.group.position.distanceTo(point) - b.group.position.distanceTo(point))[0];
 };
 
+const nearestLampInTile = (coord: GridCoord) => {
+  const key = keyOf(coord.x, coord.z);
+  const point = hoveredWorldPoint ?? worldPos(coord.x, coord.z);
+  return lampsInTile(key).sort((a, b) => a.group.position.distanceTo(point) - b.group.position.distanceTo(point))[0];
+};
+
 const addBench = (coord: GridCoord, silent = false, edge = benchEdgeForPlacement(coord)) => {
   if (!canPlaceBenchAt(coord, edge)) {
     if (!silent) setStatus(t('status.benchNeedsPathEdge'));
@@ -2865,6 +3133,82 @@ const removeBenchesOnPath = (pathKey: string) => {
     buildGroup.remove(bench.group);
     benches.delete(key);
     refundBuildCost(gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench, 'tool.bench');
+  });
+};
+
+const releaseBenchAtKey = (benchKey: string) => {
+  const bench = benches.get(benchKey);
+  if (!bench) return null;
+
+  guests.forEach((guest) => {
+    if (guest.targetBenchKey !== benchKey) return;
+    const wasSitting = guest.state === 'sitting';
+    releaseBenchForGuest(guest);
+    if (wasSitting) sendGuestSeekingPath(guest);
+  });
+  buildGroup.remove(bench.group);
+  benches.delete(benchKey);
+  return bench;
+};
+
+const addLamp = (coord: GridCoord, silent = false, edge = benchEdgeForPlacement(coord)) => {
+  if (!canPlaceLampAt(coord, edge)) {
+    if (!silent) setStatus(t('status.lampNeedsPathEdge'));
+    return false;
+  }
+
+  const replacedBenchKey = benchKeyFor(coord, edge);
+  const refund = benches.has(replacedBenchKey) ? benchRefundAmount() : 0;
+  const cost = lampBuildCost();
+  const netCost = Math.max(0, cost - refund);
+  if (!silent && parkCash < netCost) {
+    setStatus(t('status.notEnoughCash', { cost: formatMoney(netCost), cash: formatMoney(parkCash) }));
+    return false;
+  }
+
+  if (!silent) {
+    parkCash -= netCost;
+    refreshStats();
+  }
+
+  const replacedBench = releaseBenchAtKey(replacedBenchKey);
+  const lampKey = lampKeyFor(coord, edge);
+  const { group, light, glow } = createLampVisual();
+  group.position.copy(lampPositionForEdge(coord, edge));
+  group.rotation.y = benchRotationForEdge(edge);
+  group.traverse((child) => {
+    child.userData.lampKey = lampKey;
+  });
+  buildGroup.add(group);
+  lamps.set(lampKey, { group, light, glow, coord, edge });
+  updateLampVisuals();
+  if (!silent) {
+    setStatus(
+      replacedBench
+        ? t('status.lampPlacedWithBenchReplace', { cost: formatMoney(cost), refund: formatMoney(refund), net: formatMoney(netCost) })
+        : t('status.lampPlaced', { key: keyOf(coord.x, coord.z) }),
+    );
+  }
+  return true;
+};
+
+const removeLamp = (lampKey: string) => {
+  const lamp = lamps.get(lampKey);
+  if (!lamp) return null;
+
+  buildGroup.remove(lamp.group);
+  lamps.delete(lampKey);
+  refundBuildCost(gameConfig.economy.buildCosts.lamp * gameConfig.economy.refundRates.lamp, 'tool.lamp');
+  setStatus(t('status.lampRemoved', { key: keyOf(lamp.coord.x, lamp.coord.z) }));
+  return 'lamp' as const;
+};
+
+const removeLampsOnPath = (pathKey: string) => {
+  lampsInTile(pathKey).forEach((lamp) => {
+    const key = lampKeyFor(lamp.coord, lamp.edge);
+    buildGroup.remove(lamp.group);
+    lamps.delete(key);
+    refundBuildCost(gameConfig.economy.buildCosts.lamp * gameConfig.economy.refundRates.lamp, 'tool.lamp');
   });
 };
 
@@ -3014,6 +3358,32 @@ const createCarousel = () => {
   platform.castShadow = true;
   rotor.add(platform);
 
+  const platformGlow = new THREE.Mesh(
+    new THREE.RingGeometry(1.08, 2.08, 56),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd36a,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  platformGlow.rotation.x = -Math.PI / 2;
+  platformGlow.position.y = 0.555;
+  platformGlow.userData.carouselPlatformGlow = true;
+  rotor.add(platformGlow);
+
+  for (let i = 0; i < 12; i += 1) {
+    const angle = (i / 12) * Math.PI * 2;
+    const floorBulb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfff0aa, emissive: 0xf4d35e, emissiveIntensity: 0.12, roughness: 0.36 }),
+    );
+    floorBulb.position.set(Math.cos(angle) * 1.83, 0.62, Math.sin(angle) * 1.83);
+    floorBulb.userData.carouselFloorBulb = true;
+    rotor.add(floorBulb);
+  }
+
   const mast = new THREE.Mesh(
     new THREE.CylinderGeometry(0.16, 0.2, 2.7, 16),
     new THREE.MeshStandardMaterial({ color: 0x30475e, roughness: 0.4, metalness: 0.1 }),
@@ -3023,6 +3393,24 @@ const createCarousel = () => {
   rotor.add(mast);
 
   rotor.add(createCarouselCanopy());
+
+  for (let i = 0; i < 16; i += 1) {
+    const angle = (i / 16) * Math.PI * 2;
+    const bulb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfff1a8, emissive: 0xf4d35e, emissiveIntensity: 0.15, roughness: 0.35 }),
+    );
+    bulb.position.set(Math.cos(angle) * 1.86, 2.74, Math.sin(angle) * 1.86);
+    bulb.userData.carouselBulb = true;
+    rotor.add(bulb);
+
+    if (i % 4 === 0) {
+      const light = new THREE.PointLight(0xffd36a, 0, 5.5, 2.1);
+      light.position.copy(bulb.position);
+      light.userData.carouselNightLight = true;
+      rotor.add(light);
+    }
+  }
 
   const cap = new THREE.Mesh(
     new THREE.SphereGeometry(0.24, 16, 10),
@@ -3133,6 +3521,7 @@ const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementR
   });
 
   selectedRideId = id;
+  updateCarouselNightLights();
   updateSelectedRidePanel();
   if (!silent) {
     setTool('entrance');
@@ -3182,6 +3571,10 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     const bench = nearestBenchInTile(coord);
     return bench ? removeBench(benchKeyFor(bench.coord, bench.edge)) : null;
   }
+  if (allowedTarget === 'lamp') {
+    const lamp = nearestLampInTile(coord);
+    return lamp ? removeLamp(lampKeyFor(lamp.coord, lamp.edge)) : null;
+  }
 
   const target = bulldozeTargetAt(coord);
   if (allowedTarget && target !== allowedTarget) return null;
@@ -3192,6 +3585,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     path.geometry.dispose();
     paths.delete(key);
     removeBenchesOnPath(key);
+    removeLampsOnPath(key);
     queuePaths.forEach((queuePath) => {
       if (queuePath.entryPathKey === key) queuePath.entryPathKey = undefined;
     });
@@ -3208,6 +3602,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
   if (queuePath) {
     buildGroup.remove(queuePath.group);
     queuePaths.delete(key);
+    removeLampsOnPath(key);
     if (lastQueueBuildKey === key) lastQueueBuildKey = null;
     queuePaths.forEach((candidate) => {
       if (candidate.nextKey === key) candidate.nextKey = undefined;
@@ -3252,6 +3647,9 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
 
   const tree = nearestTreeInTile(coord);
   if (tree) return removeTree(tree.group.userData.treeKey as string);
+
+  const lamp = nearestLampInTile(coord);
+  if (lamp) return removeLamp(lampKeyFor(lamp.coord, lamp.edge));
 
   const rideId = occupied.get(key);
   if (rideId) {
@@ -4846,6 +5244,14 @@ const seedPark = () => {
     { coord: { x: 7, z: -1 }, edge: 'east' },
   ].forEach(({ coord, edge }) => addBench(coord, true, edge as QueueEdge));
 
+  [
+    { coord: { x: -4, z: 2 }, edge: 'south' },
+    { coord: { x: 2, z: 2 }, edge: 'south' },
+    { coord: { x: 7, z: 2 }, edge: 'south' },
+    { coord: { x: 7, z: -3 }, edge: 'east' },
+    { coord: { x: 4, z: 0 }, edge: 'east' },
+  ].forEach(({ coord, edge }) => addLamp(coord, true, edge as QueueEdge));
+
   createAudioTestZones();
 
   const initialGuestPathKeys = [
@@ -4951,6 +5357,9 @@ const buildObjectAtPointer = (event: PointerEvent): PickedBuildObject | undefine
       const benchKey = object.userData.benchKey as string | undefined;
       if (benchKey && benches.has(benchKey)) return { type: 'bench', benchKey };
 
+      const lampKey = object.userData.lampKey as string | undefined;
+      if (lampKey && lamps.has(lampKey)) return { type: 'lamp', lampKey };
+
       const rideId = object.userData.rideId as string | undefined;
       if (rideId && rides.has(rideId)) return { type: 'ride', rideId };
 
@@ -5024,14 +5433,11 @@ const handleBuild = (event: PointerEvent) => {
 
   const clickedBuildObject = buildObjectAtPointer(event);
   if (activeTool === 'bulldoze' && clickedBuildObject) {
-    const removedTarget =
-      clickedBuildObject.type === 'tree'
-        ? removeTree(clickedBuildObject.treeKey)
-        : clickedBuildObject.type === 'bench'
-          ? removeBench(clickedBuildObject.benchKey)
-        : clickedBuildObject.type === 'ride'
-          ? removeRideById(clickedBuildObject.rideId)
-          : null;
+    let removedTarget: BulldozeTarget | null = null;
+    if (clickedBuildObject.type === 'tree') removedTarget = removeTree(clickedBuildObject.treeKey);
+    if (clickedBuildObject.type === 'bench') removedTarget = removeBench(clickedBuildObject.benchKey);
+    if (clickedBuildObject.type === 'lamp') removedTarget = removeLamp(clickedBuildObject.lampKey);
+    if (clickedBuildObject.type === 'ride') removedTarget = removeRideById(clickedBuildObject.rideId);
     if (removedTarget) {
       isBulldozeDragging = true;
       bulldozeDragTarget = removedTarget;
@@ -5105,6 +5511,7 @@ const handleBuild = (event: PointerEvent) => {
   const treeKind = treeKindForTool(activeTool);
   if (treeKind) addTree(hoveredTile, false, placementRotationStep, treeKind);
   if (activeTool === 'bench') addBench(hoveredTile);
+  if (activeTool === 'lamp') addLamp(hoveredTile);
   if (activeTool === 'carousel') addCarousel(hoveredTile);
   if (activeTool === 'entrance') addRideGate(hoveredTile, 'entrance');
   if (activeTool === 'exit') addRideGate(hoveredTile, 'exit');
@@ -5261,6 +5668,23 @@ continuousRotationToggle.addEventListener('change', () => {
   }
 
   setStatus(t('status.continuousRotation'));
+});
+
+dayButton.addEventListener('click', () => {
+  setTimeOfDay('day');
+  dayButton.blur();
+});
+
+nightButton.addEventListener('click', () => {
+  setTimeOfDay('night');
+  nightButton.blur();
+});
+
+debugToggleButton.addEventListener('click', () => {
+  debugConsoleVisible = !debugConsoleVisible;
+  syncDebugConsoleVisibility();
+  setStatus(t(debugConsoleVisible ? 'status.debugShown' : 'status.debugHidden'));
+  debugToggleButton.blur();
 });
 
 const toolStatusLabel = (tool: Tool) => {
@@ -5463,6 +5887,7 @@ applyStaticTranslations();
 syncTreeScaleControl();
 seedPark();
 syncEconomyPanel();
+applyTimeOfDay();
 setTool('select');
 updateSelectedRidePanel();
 

@@ -442,6 +442,29 @@ button {
   content: "";
 }
 
+.lamp-icon::before {
+  position: absolute;
+  left: 11px;
+  bottom: 3px;
+  width: 4px;
+  height: 17px;
+  border-radius: 2px;
+  background: #33404a;
+  content: "";
+}
+
+.lamp-icon::after {
+  position: absolute;
+  left: 7px;
+  top: 1px;
+  width: 12px;
+  height: 9px;
+  border-radius: 8px 8px 4px 4px;
+  background: #f4d35e;
+  box-shadow: 0 0 8px rgb(244 211 94 / 70%);
+  content: "";
+}
+
 .bulldoze-icon::before {
   position: absolute;
   left: 3px;
@@ -707,7 +730,29 @@ button {
   min-height: 100%;
 }
 
+.viewport-wrap::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image:
+    radial-gradient(circle at 12% 18%, rgb(255 255 255 / 76%) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 78% 12%, rgb(214 232 255 / 72%) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 45% 32%, rgb(255 241 207 / 54%) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 28% 76%, rgb(255 255 255 / 48%) 0 1px, transparent 1.8px);
+  background-size: 160px 120px, 230px 170px, 310px 210px, 420px 260px;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+body.is-night .viewport-wrap::before {
+  opacity: 0.72;
+}
+
 #scene {
+  position: relative;
+  z-index: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -718,7 +763,7 @@ button {
   position: absolute;
   top: 18px;
   right: 18px;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   width: min(280px, calc(100% - 36px));
   border: 1px solid rgb(27 42 54 / 18%);
@@ -829,6 +874,7 @@ button {
   right: 18px;
   bottom: 154px;
   left: 18px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -842,11 +888,27 @@ button {
   backdrop-filter: blur(10px);
 }
 
+.status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-bar span {
+  min-width: 0;
+}
+
+body.debug-hidden .status-bar {
+  bottom: 18px;
+}
+
 .debug-console {
   position: absolute;
   right: 18px;
   bottom: 18px;
   left: 18px;
+  z-index: 2;
   display: grid;
   grid-template-rows: 28px minmax(0, 86px);
   height: 122px;
@@ -857,6 +919,10 @@ button {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.75rem;
   overflow: hidden;
+}
+
+.debug-console[hidden] {
+  display: none;
 }
 
 .debug-header {
@@ -942,6 +1008,10 @@ button {
     right: 10px;
     bottom: 142px;
     left: 10px;
+  }
+
+  body.debug-hidden .status-bar {
+    bottom: 10px;
   }
 
   .debug-console {

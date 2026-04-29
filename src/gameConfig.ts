@@ -29,6 +29,7 @@ export const gameConfig = {
       firTree: 35,
       cherryTree: 45,
       bench: 22,
+      lamp: 90,
     },
     refundRates: {
       path: 0.45,
@@ -39,6 +40,7 @@ export const gameConfig = {
       firTree: 0.25,
       cherryTree: 0.25,
       bench: 0.25,
+      lamp: 0.35,
     },
   },
 } as const;
