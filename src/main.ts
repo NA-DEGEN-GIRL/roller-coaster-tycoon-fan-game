@@ -10,6 +10,7 @@ type GridCoord = {
 
 type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
+type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'ride';
 
 type QueuePath = {
   group: THREE.Group;
@@ -38,7 +39,7 @@ type Guest = {
   progress: number;
   speed: number;
   pause: number;
-  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting';
+  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'seeking';
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
@@ -46,6 +47,8 @@ type Guest = {
   queueRouteIndex?: number;
   queueMoveStart?: THREE.Vector3;
   boardingTarget?: THREE.Vector3;
+  wanderTarget?: THREE.Vector3;
+  seekTimer?: number;
   rideTime: number;
 };
 
@@ -235,8 +238,11 @@ let cameraZoom = 1;
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 let isMiddleDragging = false;
 let isPathDragging = false;
+let isBulldozeDragging = false;
 let lastDraggedBuildKey: string | null = null;
+let lastDraggedBulldozeKey: string | null = null;
 let lastQueueBuildKey: string | null = null;
+let bulldozeDragTarget: BulldozeTarget | null = null;
 let lastDragX = 0;
 let lastDragY = 0;
 const pressedMovementKeys = new Set<string>();
@@ -436,7 +442,8 @@ const updateDebugStatus = () => {
   const queueing = guests.filter((guest) => guest.state === 'queueing' && guest.rideId === ride.id).length;
   const boarding = guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id).length;
   const exiting = guests.filter((guest) => guest.state === 'exiting' && guest.rideId === ride.id).length;
-  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · exiting ${exiting} · queueing ${queueing} · waiting ${waiting} · timer ${ride.phaseTimer.toFixed(1)}s`;
+  const seeking = guests.filter((guest) => guest.state === 'seeking').length;
+  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · exiting ${exiting} · queueing ${queueing} · waiting ${waiting} · seeking ${seeking} · timer ${ride.phaseTimer.toFixed(1)}s`;
 };
 
 const setSimulationSpeed = (speed: number) => {
@@ -451,6 +458,7 @@ const setSimulationSpeed = (speed: number) => {
 const setTool = (tool: Tool) => {
   activeTool = tool;
   if (tool !== 'queue') lastQueueBuildKey = null;
+  resetDragActions();
   toolButtons.forEach((button) => {
     button.classList.toggle('is-active', button.dataset.tool === tool);
   });
@@ -574,6 +582,17 @@ const canPlace = (tool: Tool, coord: GridCoord) => {
   return isAnyBuiltPath(key) || occupied.has(key) || trees.has(key) || entrances.has(key) || exits.has(key);
 };
 
+const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
+  const key = keyOf(coord.x, coord.z);
+  if (paths.has(key)) return 'path';
+  if (queuePaths.has(key)) return 'queue';
+  if (entrances.has(key)) return 'entrance';
+  if (exits.has(key)) return 'exit';
+  if (trees.has(key)) return 'tree';
+  if (occupied.has(key)) return 'ride';
+  return null;
+};
+
 const updatePreview = () => {
   clearPreview();
   if (!hoveredTile) {
@@ -616,6 +635,14 @@ const buildDraggedPathAt = (coord: GridCoord) => {
   if (activeTool === 'path') return addPath(coord);
   if (activeTool === 'queue') return addQueuePath(coord);
   return false;
+};
+
+const resetDragActions = () => {
+  isPathDragging = false;
+  isBulldozeDragging = false;
+  lastDraggedBuildKey = null;
+  lastDraggedBulldozeKey = null;
+  bulldozeDragTarget = null;
 };
 
 const addPath = (coord: GridCoord, silent = false) => {
@@ -1245,7 +1272,10 @@ const addCarousel = (coord: GridCoord, silent = false) => {
   return true;
 };
 
-const removeAt = (coord: GridCoord) => {
+const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
+  const target = bulldozeTargetAt(coord);
+  if (allowedTarget && target !== allowedTarget) return null;
+
   const key = keyOf(coord.x, coord.z);
   const path = paths.get(key);
   if (path) {
@@ -1260,7 +1290,7 @@ const removeAt = (coord: GridCoord) => {
     refreshStats();
     updateSelectedRidePanel();
     setStatus(`Path removed at ${key}`);
-    return true;
+    return 'path';
   }
 
   const queuePath = queuePaths.get(key);
@@ -1276,7 +1306,7 @@ const removeAt = (coord: GridCoord) => {
     refreshStats();
     updateSelectedRidePanel();
     setStatus(`Queue path removed at ${key}`);
-    return true;
+    return 'queue';
   }
 
   const entrance = entrances.get(key);
@@ -1292,7 +1322,7 @@ const removeAt = (coord: GridCoord) => {
     resetInvalidGuests();
     updateSelectedRidePanel();
     setStatus('Entrance removed');
-    return true;
+    return 'entrance';
   }
 
   const exit = exits.get(key);
@@ -1303,7 +1333,7 @@ const removeAt = (coord: GridCoord) => {
     exits.delete(key);
     updateSelectedRidePanel();
     setStatus('Exit removed');
-    return true;
+    return 'exit';
   }
 
   const tree = trees.get(key);
@@ -1311,13 +1341,13 @@ const removeAt = (coord: GridCoord) => {
     buildGroup.remove(tree);
     trees.delete(key);
     setStatus(`Tree removed at ${key}`);
-    return true;
+    return 'tree';
   }
 
   const rideId = occupied.get(key);
   if (rideId) {
     const ride = rides.get(rideId);
-    if (!ride) return false;
+    if (!ride) return null;
     buildGroup.remove(ride.group);
     if (ride.entranceKey) {
       const entrance = entrances.get(ride.entranceKey);
@@ -1338,11 +1368,11 @@ const removeAt = (coord: GridCoord) => {
     refreshStats();
     updateSelectedRidePanel();
     setStatus('Ride removed');
-    return true;
+    return 'ride';
   }
 
   setStatus('Nothing to remove');
-  return false;
+  return null;
 };
 
 const neighborsOf = (key: string) => {
@@ -1368,6 +1398,22 @@ const queueNeighborsOf = (key: string) => {
 const randomPathKey = () => {
   const keys = [...paths.keys()];
   return keys[Math.floor(Math.random() * keys.length)] ?? '0,0';
+};
+
+const nearestPathKeyFromPosition = (position: THREE.Vector3) => {
+  let nearestKey: string | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  paths.forEach((_path, key) => {
+    const coord = parseKey(key);
+    const dx = coord.x * tileSize - position.x;
+    const dz = coord.z * tileSize - position.z;
+    const distance = dx * dx + dz * dz;
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestKey = key;
+    }
+  });
+  return nearestKey;
 };
 
 const chooseNextPath = (from: string, previous?: string) => {
@@ -1832,6 +1878,35 @@ const placeGuestInQueueSlot = (guest: Guest, ride: Ride, key: string, slotIndex:
   guest.mesh.position.copy(queueSlotPosition(ride, key, slotIndex));
 };
 
+const clearGuestQueueState = (guest: Guest) => {
+  guest.rideId = undefined;
+  guest.queueKey = undefined;
+  guest.queueSlotIndex = undefined;
+  guest.queueRoute = undefined;
+  guest.queueRouteIndex = undefined;
+  guest.boardingTarget = undefined;
+  guest.rideTime = 0;
+};
+
+const randomWanderTargetFrom = (position: THREE.Vector3) => {
+  const angle = Math.random() * Math.PI * 2;
+  const distance = tileSize * (0.35 + Math.random() * 0.45);
+  return new THREE.Vector3(position.x + Math.cos(angle) * distance, 0.12, position.z + Math.sin(angle) * distance);
+};
+
+const sendGuestSeekingPath = (guest: Guest) => {
+  clearGuestQueueState(guest);
+  guest.state = 'seeking';
+  guest.from = nearestPathKeyFromPosition(guest.mesh.position) ?? guest.from;
+  guest.to = guest.from;
+  guest.progress = 0;
+  guest.pause = 0;
+  guest.seekTimer = 0.7 + Math.random() * 1.2;
+  guest.queueMoveStart = guest.mesh.position.clone();
+  guest.wanderTarget = randomWanderTargetFrom(guest.mesh.position);
+  guest.mesh.visible = true;
+};
+
 const spawnGuest = (startKey?: string) => {
   const from = startKey ?? randomPathKey();
   const to = chooseNextPath(from);
@@ -1852,22 +1927,12 @@ const spawnGuest = (startKey?: string) => {
 };
 
 const resetInvalidGuests = () => {
-  if (paths.size === 0) return;
   guests.forEach((guest) => {
-    if (guest.state === 'boarding' || guest.state === 'riding' || guest.state === 'exiting') return;
+    if (guest.state === 'boarding' || guest.state === 'riding') return;
+    if (guest.state === 'seeking') return;
     if ((guest.state === 'queueing' || guest.state === 'waiting') && guest.queueKey && queuePaths.has(guest.queueKey)) return;
     if (!isWalkway(guest.from) || !isWalkway(guest.to)) {
-      guest.state = 'walking';
-      guest.rideId = undefined;
-      guest.queueKey = undefined;
-      guest.queueSlotIndex = undefined;
-      guest.queueRoute = undefined;
-      guest.queueRouteIndex = undefined;
-      guest.queueMoveStart = undefined;
-      guest.from = randomPathKey();
-      guest.to = chooseNextPath(guest.from);
-      guest.progress = 0;
-      placeGuestAt(guest, guest.from);
+      sendGuestSeekingPath(guest);
     }
   });
 };
@@ -1877,13 +1942,7 @@ const updateGuests = (delta: number) => {
     if (guest.state === 'boarding') {
       const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
       if (!ride || !guest.queueMoveStart || !guest.boardingTarget) {
-        guest.state = 'walking';
-        guest.rideId = undefined;
-        guest.queueMoveStart = undefined;
-        guest.boardingTarget = undefined;
-        guest.from = randomPathKey();
-        guest.to = chooseNextPath(guest.from);
-        placeGuestAt(guest, guest.from);
+        sendGuestSeekingPath(guest);
         return;
       }
 
@@ -1904,17 +1963,7 @@ const updateGuests = (delta: number) => {
     if (guest.state === 'queueing') {
       const route = guest.queueRoute;
       if (!guest.rideId || !guest.queueKey || guest.queueSlotIndex === undefined || !route || route.length === 0) {
-        guest.state = 'walking';
-        guest.rideId = undefined;
-        guest.queueKey = undefined;
-        guest.queueSlotIndex = undefined;
-        guest.queueRoute = undefined;
-        guest.queueRouteIndex = undefined;
-        guest.queueMoveStart = undefined;
-        guest.boardingTarget = undefined;
-        guest.from = randomPathKey();
-        guest.to = chooseNextPath(guest.from);
-        placeGuestAt(guest, guest.from);
+        sendGuestSeekingPath(guest);
         return;
       }
 
@@ -1960,17 +2009,43 @@ const updateGuests = (delta: number) => {
       const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
       if (ride && rideConnectionStatus(ride).ready && guest.queueKey && queuePaths.has(guest.queueKey)) return;
 
-      guest.state = 'walking';
-      guest.rideId = undefined;
-      guest.queueKey = undefined;
-      guest.queueSlotIndex = undefined;
-      guest.queueRoute = undefined;
-      guest.queueRouteIndex = undefined;
-      guest.queueMoveStart = undefined;
-      guest.boardingTarget = undefined;
-      guest.from = randomPathKey();
-      guest.to = chooseNextPath(guest.from);
-      placeGuestAt(guest, guest.from);
+      sendGuestSeekingPath(guest);
+      return;
+    }
+
+    if (guest.state === 'seeking') {
+      if (!guest.queueMoveStart || !guest.wanderTarget) {
+        guest.queueMoveStart = guest.mesh.position.clone();
+        guest.wanderTarget = randomWanderTargetFrom(guest.mesh.position);
+        guest.progress = 0;
+      }
+
+      const seekDistance = guest.queueMoveStart.distanceTo(guest.wanderTarget);
+      const seekSpeed = guest.speed * tileSize * 0.72;
+      guest.progress += (delta * seekSpeed) / Math.max(seekDistance, 0.001);
+      guest.mesh.position.lerpVectors(guest.queueMoveStart, guest.wanderTarget, Math.min(guest.progress, 1));
+      guest.mesh.rotation.y = Math.atan2(guest.wanderTarget.x - guest.queueMoveStart.x, guest.wanderTarget.z - guest.queueMoveStart.z);
+
+      if (guest.progress < 1) return;
+
+      const nearestPathKey = nearestPathKeyFromPosition(guest.mesh.position);
+      if ((guest.seekTimer ?? 0) <= 0 && nearestPathKey) {
+        guest.state = 'walking';
+        guest.from = nearestPathKey;
+        guest.to = chooseNextPath(nearestPathKey);
+        guest.progress = 0;
+        guest.pause = 0;
+        guest.queueMoveStart = undefined;
+        guest.wanderTarget = undefined;
+        guest.seekTimer = undefined;
+        placeGuestAt(guest, nearestPathKey);
+        return;
+      }
+
+      guest.seekTimer = Math.max(0, (guest.seekTimer ?? 0) - 0.45);
+      guest.queueMoveStart = guest.mesh.position.clone();
+      guest.wanderTarget = (guest.seekTimer ?? 0) <= 0 && nearestPathKey ? worldPos(parseKey(nearestPathKey).x, parseKey(nearestPathKey).z, 0.12) : randomWanderTargetFrom(guest.mesh.position);
+      guest.progress = 0;
       return;
     }
 
@@ -2112,6 +2187,14 @@ const handlePointerMove = (event: PointerEvent) => {
       updatePreview();
     }
   }
+  if (isBulldozeDragging && hoveredTile && bulldozeDragTarget) {
+    const key = keyOf(hoveredTile.x, hoveredTile.z);
+    if (key !== lastDraggedBulldozeKey) {
+      removeAt(hoveredTile, bulldozeDragTarget);
+      lastDraggedBulldozeKey = key;
+      updatePreview();
+    }
+  }
 };
 
 const handleBuild = (event: PointerEvent) => {
@@ -2143,6 +2226,18 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
+  if (activeTool === 'bulldoze') {
+    const removedTarget = removeAt(hoveredTile);
+    if (removedTarget) {
+      isBulldozeDragging = true;
+      bulldozeDragTarget = removedTarget;
+      lastDraggedBulldozeKey = hoverKey;
+      canvas.setPointerCapture(event.pointerId);
+    }
+    updatePreview();
+    return;
+  }
+
   if (activeTool === 'path' || activeTool === 'queue') {
     isPathDragging = true;
     lastDraggedBuildKey = hoverKey;
@@ -2162,18 +2257,13 @@ const handleBuild = (event: PointerEvent) => {
   if (activeTool === 'carousel') addCarousel(hoveredTile);
   if (activeTool === 'entrance') addRideGate(hoveredTile, 'entrance');
   if (activeTool === 'exit') addRideGate(hoveredTile, 'exit');
-  if (activeTool === 'bulldoze') removeAt(hoveredTile);
-
   updatePreview();
 };
 
 canvas.addEventListener('pointermove', handlePointerMove);
 canvas.addEventListener('pointerdown', handleBuild);
 canvas.addEventListener('pointerup', (event) => {
-  if (event.button === 0) {
-    isPathDragging = false;
-    lastDraggedBuildKey = null;
-  }
+  if (event.button === 0) resetDragActions();
   if (event.button === 1) isMiddleDragging = false;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 });
@@ -2182,8 +2272,7 @@ canvas.addEventListener('auxclick', (event) => {
 });
 canvas.addEventListener('pointerleave', () => {
   isMiddleDragging = false;
-  isPathDragging = false;
-  lastDraggedBuildKey = null;
+  resetDragActions();
   refreshQueueEntryPreviewAround(hoveredTile, previousHoveredTile);
   hoveredTile = null;
   previousHoveredTile = null;
