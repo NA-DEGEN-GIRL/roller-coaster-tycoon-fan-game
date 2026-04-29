@@ -3312,6 +3312,23 @@ const sendGuestLeavingPark = (guest: Guest) => {
   return true;
 };
 
+const resumeGuestInsidePark = (guest: Guest) => {
+  const pathKey = nearestPathKeyFromPosition(guest.mesh.position) ?? (paths.has(guest.from) ? guest.from : null);
+  if (!pathKey) {
+    sendGuestSeekingPath(guest);
+    return;
+  }
+
+  clearGuestQueueState(guest);
+  guest.state = 'walking';
+  guest.from = pathKey;
+  guest.to = chooseNextPath(pathKey);
+  guest.progress = 0;
+  guest.pause = Math.random() * 0.6;
+  guest.queueMoveStart = guest.mesh.position.clone();
+  guest.mesh.visible = true;
+};
+
 const spawnGuest = (startKey?: string) => {
   const from = startKey ?? randomPathKey();
   const to = chooseNextPath(from);
@@ -3909,7 +3926,12 @@ const setSelectedRideMusicPreset = (preset: CarouselMusicPreset) => {
 const setParkEntranceOpen = (isOpen: boolean) => {
   if (!parkEntrance) return;
   parkEntrance.isOpen = isOpen;
-  if (!isOpen) {
+  if (isOpen) {
+    guests.forEach((guest) => {
+      if (guest.state === 'leaving') resumeGuestInsidePark(guest);
+    });
+    guestSpawnTimer = Math.min(guestSpawnTimer, 1);
+  } else {
     guests.forEach((guest) => {
       if (guest.state !== 'boarding' && guest.state !== 'riding') sendGuestLeavingPark(guest);
     });
