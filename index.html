@@ -63,6 +63,14 @@
               <button id="ride-music-on-button" class="ride-state-button music-on" type="button" disabled data-i18n="ride.musicOn">음악 ON</button>
               <button id="ride-music-off-button" class="ride-state-button music-off" type="button" disabled data-i18n="ride.musicOff">음악 OFF</button>
             </div>
+            <label class="ride-music-select-row">
+              <span data-i18n="ride.musicPreset">음악</span>
+              <select id="ride-music-preset-select" class="ride-music-select" disabled aria-label="회전목마 음악 선택" data-i18n-aria="aria.rideMusicPreset">
+                <option value="fairgroundOrgan" data-i18n="music.fairgroundOrgan">페어그라운드 오르간</option>
+                <option value="waltzOrgan" data-i18n="music.waltzOrgan">왈츠 오르간</option>
+                <option value="musicBox" data-i18n="music.musicBox">오르골</option>
+              </select>
+            </label>
             <div class="ride-actions" aria-label="선택한 놀이기구 배치 도구" data-i18n-aria="aria.rideTools">
               <button id="place-entrance-button" class="ride-action" type="button" title="입구 설치" data-i18n-title="ride.placeEntrance" disabled data-ride-tool="entrance">
                 <span class="icon entrance-icon"></span>
