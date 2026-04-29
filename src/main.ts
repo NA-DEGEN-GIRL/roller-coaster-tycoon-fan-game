@@ -11,6 +11,7 @@ type GridCoord = {
 type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
 type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'ride';
+type Language = 'ko' | 'en';
 
 type QueuePath = {
   group: THREE.Group;
@@ -84,6 +85,7 @@ const guestCount = document.querySelector<HTMLElement>('#guest-count');
 const pathCount = document.querySelector<HTMLElement>('#path-count');
 const queueCount = document.querySelector<HTMLElement>('#queue-count');
 const rideCount = document.querySelector<HTMLElement>('#ride-count');
+const ridePanel = document.querySelector<HTMLElement>('.ride-panel');
 const selectedRideName = document.querySelector<HTMLElement>('#selected-ride-name');
 const selectedRideStatus = document.querySelector<HTMLElement>('#selected-ride-status');
 const rideOpenButton = document.querySelector<HTMLButtonElement>('#ride-open-button');
@@ -91,6 +93,7 @@ const rideCloseButton = document.querySelector<HTMLButtonElement>('#ride-close-b
 const placeEntranceButton = document.querySelector<HTMLButtonElement>('#place-entrance-button');
 const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-button');
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
+const languageSelect = document.querySelector<HTMLSelectElement>('#language-select');
 const debugLog = document.querySelector<HTMLElement>('#debug-log');
 const debugStatus = document.querySelector<HTMLElement>('#debug-status');
 const guestWindow = document.querySelector<HTMLElement>('#guest-window');
@@ -115,6 +118,7 @@ if (
   !pathCount ||
   !queueCount ||
   !rideCount ||
+  !ridePanel ||
   !selectedRideName ||
   !selectedRideStatus ||
   !rideOpenButton ||
@@ -122,6 +126,7 @@ if (
   !placeEntranceButton ||
   !placeExitButton ||
   !continuousRotationToggle ||
+  !languageSelect ||
   !debugLog ||
   !debugStatus ||
   !guestWindow ||
@@ -304,6 +309,301 @@ const worldPos = (x: number, z: number, lift = 0) => new THREE.Vector3(x * tileS
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const debugLines: string[] = [];
+let language: Language = 'ko';
+
+const translations: Record<Language, Record<string, string>> = {
+  ko: {
+    'aria.parkTools': '놀이공원 도구',
+    'aria.languageSelect': '언어 선택',
+    'aria.buildTools': '건설 도구',
+    'aria.rideState': '놀이기구 운영 상태',
+    'aria.rideTools': '선택한 놀이기구 배치 도구',
+    'aria.simulationSpeed': '시뮬레이션 속도',
+    'aria.scene': '아이소메트릭 3D 놀이공원 빌더',
+    'aria.selectedGuest': '선택한 손님',
+    'aria.guestStatus': '손님 상태',
+    'aria.debugConsole': '디버그 콘솔',
+    'brand.title': '파크 빌더',
+    'brand.subtitle': '프리팹 놀이공원 시뮬레이션',
+    'language.label': '언어',
+    'section.build': '건설',
+    'section.selectedRide': '선택한 놀이기구',
+    'section.camera': '카메라',
+    'section.simulation': '시뮬레이션',
+    'section.park': '공원',
+    'tool.select': '선택',
+    'tool.path': '길',
+    'tool.queue': '대기줄 길',
+    'tool.carousel': '회전목마 세트',
+    'tool.tree': '나무',
+    'tool.bulldoze': '철거',
+    'tool.entrance': '입구',
+    'tool.exit': '출구',
+    'toolStatus.select': '선택 도구 선택됨',
+    'toolStatus.path': '길 도구 선택됨',
+    'toolStatus.queue': '대기줄 길 도구 선택됨',
+    'toolStatus.carousel': '회전목마 프리팹 선택됨',
+    'toolStatus.tree': '나무 도구 선택됨',
+    'toolStatus.bulldoze': '철거 도구 선택됨',
+    'toolStatus.entrance': '입구 도구 선택됨',
+    'toolStatus.exit': '출구 도구 선택됨',
+    'ride.open': '오픈',
+    'ride.closed': '닫힘',
+    'ride.entrance': '입구',
+    'ride.exit': '출구',
+    'ride.placeEntrance': '입구 설치',
+    'ride.placeExit': '출구 설치',
+    'ride.none': '선택한 놀이기구 없음',
+    'ride.prompt': '회전목마를 설치하거나 클릭하세요',
+    'ride.closedStatus': '닫힘',
+    'ride.needsEntrance': '입구 필요',
+    'ride.connectEntrance': '입구를 대기줄과 연결하세요',
+    'ride.connectQueueTail': '대기줄 끝을 일반 길과 연결하세요',
+    'ride.needsExit': '출구 필요',
+    'ride.connectExit': '출구를 일반 길과 연결하세요',
+    'ride.riding': '탑승 중',
+    'ride.carouselName': '회전목마',
+    'stats.guests': '손님',
+    'stats.paths': '길',
+    'stats.queues': '대기줄',
+    'stats.rides': '놀이기구',
+    'stats.rating': '평점',
+    'camera.continuous': '연속 Q/E 회전',
+    'guest.label': '손님',
+    'guest.money': '돈',
+    'guest.hunger': '배고픔',
+    'guest.tiredness': '피곤함',
+    'guest.happiness': '행복도',
+    'guest.nausea': '멀미',
+    'guest.closeWindow': '손님 창 닫기',
+    'guest.follow': '카메라로 따라가기',
+    'guest.following': '카메라 추적 중',
+    'guest.walking': '공원을 걷는 중',
+    'guest.queueing': '대기줄 안으로 이동 중',
+    'guest.waiting': '줄에서 기다리는 중',
+    'guest.boarding': '놀이기구에 탑승 중',
+    'guest.riding': '놀이기구 탑승 중',
+    'guest.exiting': '놀이기구에서 나오는 중',
+    'guest.seeking': '길을 찾는 중',
+    'pause.pause': '일시정지',
+    'pause.resume': '재개',
+    'debug.noRide': '손님 {guests}명 · 선택한 놀이기구 없음',
+    'debug.status': '{ride} · {phase} · {speed}x · 탑승 {riders} · 탑승중 {boarding} · 하차중 {exiting} · 대기줄이동 {queueing} · 대기 {waiting} · 길찾기 {seeking} · 타이머 {timer}s',
+    'debug.booting': '시뮬레이션 시작 중',
+    'status.language': '언어: 한국어',
+    'status.speed': '시뮬레이션 속도 {speed}x',
+    'status.pathBuilt': '길 설치: {key}',
+    'status.selectRideFirst': '먼저 놀이기구를 선택하세요',
+    'status.entranceAlready': '입구가 이미 설치되어 있습니다',
+    'status.exitAlready': '출구가 이미 설치되어 있습니다',
+    'status.queueEntryConnected': '대기줄 진입 지점 연결: {key}',
+    'status.queueBuilt': '대기줄 설치: {key}{hint}',
+    'status.queueBuiltHint': ' · 인접한 길을 클릭해 진입 지점을 정하세요',
+    'status.queueBuiltConnectEntrance': '대기줄 설치: {key} · 입구와 연결하세요',
+    'status.entrancePlacedNextExit': '입구 설치됨 · {ride} 출구를 설치하세요',
+    'status.gatePlaced': '{kind} 설치됨: {ride}',
+    'status.treePlanted': '나무 심음: {key}',
+    'status.carouselInstalled': '회전목마 세트 설치됨 · 입구를 설치하세요',
+    'status.pathRemoved': '길 삭제: {key}',
+    'status.queueRemoved': '대기줄 삭제: {key}',
+    'status.entranceRemoved': '입구 삭제됨',
+    'status.exitRemoved': '출구 삭제됨',
+    'status.treeRemoved': '나무 삭제: {key}',
+    'status.rideRemoved': '놀이기구 삭제됨',
+    'status.nothingToRemove': '삭제할 대상 없음',
+    'status.carouselSelected': '회전목마 선택됨',
+    'status.selectionCleared': '선택 해제됨',
+    'status.guestSelected': '{guest} 선택됨',
+    'status.panCamera': '카메라 이동',
+    'status.clickPathBesideQueue': '대기줄 끝 옆의 길을 클릭하세요',
+    'status.rideOpened': '놀이기구 오픈',
+    'status.rideClosed': '놀이기구 닫힘',
+    'status.followOn': '{guest} 카메라 추적 중',
+    'status.followOff': '{guest} 카메라 추적 끔',
+    'status.guestWindowClosed': '손님 창 닫힘',
+    'status.quarterRotation': '쿼터뷰 회전',
+    'status.continuousRotation': '연속 Q/E 회전',
+    'status.paused': '시뮬레이션 일시정지',
+    'status.zoom': '확대 {zoom}%',
+    'status.viewRotated': '{key} 방향으로 화면 회전',
+    'debug.boarded': '{ride} 손님 탑승 완료 ({riders}/{capacity})',
+    'debug.boarding': '{ride} 손님 탑승 중',
+    'debug.queueFullLeft': '{ride} 대기줄 가득 참; 손님 이탈',
+    'debug.waiting': '{ride} 줄에서 대기',
+    'debug.queueMoved': '{ride} 대기줄 전진',
+    'debug.queueFullWalking': '{ride} 대기줄 가득 참; 손님 계속 이동',
+    'debug.walkingIntoQueue': '{ride} 대기줄로 이동 중',
+    'debug.phase': '{ride} {phase}',
+    'debug.unloaded': '{ride} 탑승객 하차 완료',
+    'debug.reachedQueueSlot': '{ride} 대기 슬롯 도착',
+    'phase.idle': '대기',
+    'phase.loading': '탑승',
+    'phase.running': '운행',
+    'phase.unloading': '하차',
+  },
+  en: {
+    'aria.parkTools': 'Park tools',
+    'aria.languageSelect': 'Language selection',
+    'aria.buildTools': 'Build tools',
+    'aria.rideState': 'Ride operating state',
+    'aria.rideTools': 'Selected ride placement tools',
+    'aria.simulationSpeed': 'Simulation speed',
+    'aria.scene': 'Isometric 3D amusement park builder',
+    'aria.selectedGuest': 'Selected guest',
+    'aria.guestStatus': 'Guest status',
+    'aria.debugConsole': 'Debug console',
+    'brand.title': 'Park Builder',
+    'brand.subtitle': 'Prefab park simulation',
+    'language.label': 'Language',
+    'section.build': 'Build',
+    'section.selectedRide': 'Selected Ride',
+    'section.camera': 'Camera',
+    'section.simulation': 'Simulation',
+    'section.park': 'Park',
+    'tool.select': 'Select',
+    'tool.path': 'Path',
+    'tool.queue': 'Queue path',
+    'tool.carousel': 'Carousel set',
+    'tool.tree': 'Trees',
+    'tool.bulldoze': 'Bulldoze',
+    'tool.entrance': 'Entrance',
+    'tool.exit': 'Exit',
+    'toolStatus.select': 'Select tool selected',
+    'toolStatus.path': 'Path tool selected',
+    'toolStatus.queue': 'Queue path tool selected',
+    'toolStatus.carousel': 'Carousel prefab selected',
+    'toolStatus.tree': 'Tree tool selected',
+    'toolStatus.bulldoze': 'Bulldoze tool selected',
+    'toolStatus.entrance': 'Entrance tool selected',
+    'toolStatus.exit': 'Exit tool selected',
+    'ride.open': 'Open',
+    'ride.closed': 'Closed',
+    'ride.entrance': 'Entrance',
+    'ride.exit': 'Exit',
+    'ride.placeEntrance': 'Place entrance',
+    'ride.placeExit': 'Place exit',
+    'ride.none': 'No ride selected',
+    'ride.prompt': 'Place or click a carousel',
+    'ride.closedStatus': 'Closed',
+    'ride.needsEntrance': 'Needs entrance',
+    'ride.connectEntrance': 'Connect entrance to queue',
+    'ride.connectQueueTail': 'Connect queue tail to path',
+    'ride.needsExit': 'Needs exit',
+    'ride.connectExit': 'Connect exit to path',
+    'ride.riding': 'riding',
+    'ride.carouselName': 'Carousel',
+    'stats.guests': 'Guests',
+    'stats.paths': 'Paths',
+    'stats.queues': 'Queues',
+    'stats.rides': 'Rides',
+    'stats.rating': 'Rating',
+    'camera.continuous': 'Continuous QE',
+    'guest.label': 'Guest',
+    'guest.money': 'Money',
+    'guest.hunger': 'Hunger',
+    'guest.tiredness': 'Tiredness',
+    'guest.happiness': 'Happiness',
+    'guest.nausea': 'Nausea',
+    'guest.closeWindow': 'Close guest window',
+    'guest.follow': 'Follow camera',
+    'guest.following': 'Following camera',
+    'guest.walking': 'Walking around the park',
+    'guest.queueing': 'Walking through a queue',
+    'guest.waiting': 'Waiting in line',
+    'guest.boarding': 'Boarding a ride',
+    'guest.riding': 'On a ride',
+    'guest.exiting': 'Leaving a ride',
+    'guest.seeking': 'Looking for a path',
+    'pause.pause': 'Pause',
+    'pause.resume': 'Resume',
+    'debug.noRide': 'Guests {guests} · no ride selected',
+    'debug.status': '{ride} · {phase} · {speed}x · riders {riders} · boarding {boarding} · exiting {exiting} · queueing {queueing} · waiting {waiting} · seeking {seeking} · timer {timer}s',
+    'debug.booting': 'Simulation booting',
+    'status.language': 'Language: English',
+    'status.speed': 'Simulation speed {speed}x',
+    'status.pathBuilt': 'Path built at {key}',
+    'status.selectRideFirst': 'Select a ride first',
+    'status.entranceAlready': 'Entrance already placed',
+    'status.exitAlready': 'Exit already placed',
+    'status.queueEntryConnected': 'Queue entry connected at {key}',
+    'status.queueBuilt': 'Queue path built at {key}{hint}',
+    'status.queueBuiltHint': ' · click adjacent path to set entry',
+    'status.queueBuiltConnectEntrance': 'Queue path built at {key} · connect from entrance',
+    'status.entrancePlacedNextExit': 'Entrance placed · place {ride} exit',
+    'status.gatePlaced': '{kind} placed for {ride}',
+    'status.treePlanted': 'Tree planted at {key}',
+    'status.carouselInstalled': 'Carousel set installed · place entrance',
+    'status.pathRemoved': 'Path removed at {key}',
+    'status.queueRemoved': 'Queue path removed at {key}',
+    'status.entranceRemoved': 'Entrance removed',
+    'status.exitRemoved': 'Exit removed',
+    'status.treeRemoved': 'Tree removed at {key}',
+    'status.rideRemoved': 'Ride removed',
+    'status.nothingToRemove': 'Nothing to remove',
+    'status.carouselSelected': 'Carousel selected',
+    'status.selectionCleared': 'Selection cleared',
+    'status.guestSelected': '{guest} selected',
+    'status.panCamera': 'Pan camera',
+    'status.clickPathBesideQueue': 'Click a path beside the queue tail',
+    'status.rideOpened': 'Ride opened',
+    'status.rideClosed': 'Ride closed',
+    'status.followOn': 'Following {guest}',
+    'status.followOff': '{guest} follow off',
+    'status.guestWindowClosed': 'Guest window closed',
+    'status.quarterRotation': 'Quarter view rotation',
+    'status.continuousRotation': 'Continuous QE rotation',
+    'status.paused': 'Simulation paused',
+    'status.zoom': 'Zoom {zoom}%',
+    'status.viewRotated': 'View rotated {key}',
+    'debug.boarded': '{ride} boarded guest ({riders}/{capacity})',
+    'debug.boarding': '{ride} boarding guest',
+    'debug.queueFullLeft': '{ride} queue full; guest left',
+    'debug.waiting': 'Guest waiting for {ride}',
+    'debug.queueMoved': '{ride} queue moved forward',
+    'debug.queueFullWalking': '{ride} queue full; guest kept walking',
+    'debug.walkingIntoQueue': 'Guest walking into {ride} queue',
+    'debug.phase': '{ride} {phase}',
+    'debug.unloaded': '{ride} unloaded riders',
+    'debug.reachedQueueSlot': 'Guest reached {ride} queue slot',
+    'phase.idle': 'idle',
+    'phase.loading': 'loading',
+    'phase.running': 'running',
+    'phase.unloading': 'unloading',
+  },
+};
+
+const t = (key: string, replacements: Record<string, string | number> = {}) => {
+  let text = translations[language][key] ?? translations.en[key] ?? key;
+  Object.entries(replacements).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, String(value));
+  });
+  return text;
+};
+
+const rideLabel = (rideOrId: Ride | string) => {
+  const id = typeof rideOrId === 'string' ? rideOrId : rideOrId.id;
+  return `${t('ride.carouselName')} ${id.split('-')[1]}`;
+};
+
+const guestLabel = (guest: Guest) => `${t('guest.label')} #${guest.id}`;
+
+const phaseLabel = (phase: RidePhase) => t(`phase.${phase}`);
+
+const applyStaticTranslations = () => {
+  document.documentElement.lang = language;
+  document.title = language === 'ko' ? 'RCT Three.js 프로토타입' : 'RCT Three.js Prototype';
+  languageSelect.value = language;
+  document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((element) => {
+    element.textContent = t(element.dataset.i18n ?? '');
+  });
+  document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((element) => {
+    element.title = t(element.dataset.i18nTitle ?? '');
+  });
+  document.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((element) => {
+    element.setAttribute('aria-label', t(element.dataset.i18nAria ?? ''));
+  });
+  pauseButton.textContent = isPaused ? t('pause.resume') : t('pause.pause');
+};
 
 const setStatus = (message: string) => {
   statusText.textContent = message;
@@ -328,19 +628,19 @@ const selectedGuest = () => (selectedGuestId === null ? undefined : guests.find(
 const formatPercent = (value: number) => `${Math.round(clamp(value, 0, 100))}%`;
 
 const formatGuestStatus = (guest: Guest) => {
-  if (guest.state === 'walking') return 'Walking around the park';
-  if (guest.state === 'queueing') return 'Walking through a queue';
-  if (guest.state === 'waiting') return 'Waiting in line';
-  if (guest.state === 'boarding') return 'Boarding a ride';
-  if (guest.state === 'riding') return 'On a ride';
-  if (guest.state === 'exiting') return 'Leaving a ride';
-  return 'Looking for a path';
+  if (guest.state === 'walking') return t('guest.walking');
+  if (guest.state === 'queueing') return t('guest.queueing');
+  if (guest.state === 'waiting') return t('guest.waiting');
+  if (guest.state === 'boarding') return t('guest.boarding');
+  if (guest.state === 'riding') return t('guest.riding');
+  if (guest.state === 'exiting') return t('guest.exiting');
+  return t('guest.seeking');
 };
 
 const setGuestFollow = (enabled: boolean) => {
   followSelectedGuest = enabled && Boolean(selectedGuest());
   guestFollowButton.classList.toggle('is-active', followSelectedGuest);
-  guestFollowButton.textContent = followSelectedGuest ? 'Following camera' : 'Follow camera';
+  guestFollowButton.textContent = followSelectedGuest ? t('guest.following') : t('guest.follow');
 };
 
 const updateSelectedGuestWindow = () => {
@@ -354,7 +654,7 @@ const updateSelectedGuestWindow = () => {
   }
 
   guestWindow.hidden = false;
-  guestWindowTitle.textContent = `Guest #${guest.id}`;
+  guestWindowTitle.textContent = guestLabel(guest);
   guestStatusText.textContent = formatGuestStatus(guest);
   guestMoney.textContent = `$${guest.money.toFixed(2)}`;
   guestHunger.textContent = formatPercent(guest.hunger);
@@ -362,7 +662,7 @@ const updateSelectedGuestWindow = () => {
   guestHappiness.textContent = formatPercent(guest.happiness);
   guestNausea.textContent = formatPercent(guest.nausea);
   guestFollowButton.classList.toggle('is-active', followSelectedGuest);
-  guestFollowButton.textContent = followSelectedGuest ? 'Following camera' : 'Follow camera';
+  guestFollowButton.textContent = followSelectedGuest ? t('guest.following') : t('guest.follow');
 
   if (guest.mesh.visible) {
     guestSelection.visible = true;
@@ -480,8 +780,9 @@ const updateSelectedRidePanel = () => {
   const ride = selectedRideId ? rides.get(selectedRideId) : undefined;
   if (!ride) {
     selectedRideId = null;
-    selectedRideName.textContent = 'No ride selected';
-    selectedRideStatus.textContent = 'Place or click a carousel';
+    ridePanel.hidden = true;
+    selectedRideName.textContent = t('ride.none');
+    selectedRideStatus.textContent = t('ride.prompt');
     rideOpenButton.disabled = true;
     rideCloseButton.disabled = true;
     rideOpenButton.classList.remove('is-active');
@@ -490,27 +791,28 @@ const updateSelectedRidePanel = () => {
     return;
   }
 
+  ridePanel.hidden = false;
   const connection = rideConnectionStatus(ride);
-  selectedRideName.textContent = `Carousel ${ride.id.split('-')[1]}`;
+  selectedRideName.textContent = rideLabel(ride);
   rideOpenButton.disabled = false;
   rideCloseButton.disabled = false;
   rideOpenButton.classList.toggle('is-active', ride.isOpen);
   rideCloseButton.classList.toggle('is-active', !ride.isOpen);
 
   if (!ride.isOpen) {
-    selectedRideStatus.textContent = 'Closed';
+    selectedRideStatus.textContent = t('ride.closedStatus');
   } else if (!ride.entranceKey) {
-    selectedRideStatus.textContent = 'Needs entrance';
+    selectedRideStatus.textContent = t('ride.needsEntrance');
   } else if (!connection.hasQueueConnection) {
-    selectedRideStatus.textContent = 'Connect entrance to queue';
+    selectedRideStatus.textContent = t('ride.connectEntrance');
   } else if (!connection.hasQueueEntryPath) {
-    selectedRideStatus.textContent = 'Connect queue tail to path';
+    selectedRideStatus.textContent = t('ride.connectQueueTail');
   } else if (!ride.exitKey) {
-    selectedRideStatus.textContent = 'Needs exit';
+    selectedRideStatus.textContent = t('ride.needsExit');
   } else if (!connection.hasExitPath) {
-    selectedRideStatus.textContent = 'Connect exit to path';
+    selectedRideStatus.textContent = t('ride.connectExit');
   } else {
-    selectedRideStatus.textContent = `${ride.phase.toUpperCase()} · ${ride.riders} riding`;
+    selectedRideStatus.textContent = `${phaseLabel(ride.phase).toUpperCase()} · ${ride.riders} ${t('ride.riding')}`;
   }
   updateRideToolButtons(ride);
   updateRideVisual(ride);
@@ -519,7 +821,7 @@ const updateSelectedRidePanel = () => {
 const updateDebugStatus = () => {
   const ride = selectedRideId ? rides.get(selectedRideId) : undefined;
   if (!ride) {
-    debugStatus.textContent = `Guests ${guests.length} · no ride selected`;
+    debugStatus.textContent = t('debug.noRide', { guests: guests.length });
     return;
   }
 
@@ -528,7 +830,18 @@ const updateDebugStatus = () => {
   const boarding = guests.filter((guest) => guest.state === 'boarding' && guest.rideId === ride.id).length;
   const exiting = guests.filter((guest) => guest.state === 'exiting' && guest.rideId === ride.id).length;
   const seeking = guests.filter((guest) => guest.state === 'seeking').length;
-  debugStatus.textContent = `Carousel ${ride.id.split('-')[1]} · ${ride.phase} · ${simulationSpeed}x · riders ${ride.riders} · boarding ${boarding} · exiting ${exiting} · queueing ${queueing} · waiting ${waiting} · seeking ${seeking} · timer ${ride.phaseTimer.toFixed(1)}s`;
+  debugStatus.textContent = t('debug.status', {
+    ride: rideLabel(ride),
+    phase: phaseLabel(ride.phase),
+    speed: simulationSpeed,
+    riders: ride.riders,
+    boarding,
+    exiting,
+    queueing,
+    waiting,
+    seeking,
+    timer: ride.phaseTimer.toFixed(1),
+  });
 };
 
 const setSimulationSpeed = (speed: number) => {
@@ -536,7 +849,7 @@ const setSimulationSpeed = (speed: number) => {
   speedButtons.forEach((button) => {
     button.classList.toggle('is-active', Number(button.dataset.speed) === simulationSpeed);
   });
-  setStatus(`Simulation speed ${simulationSpeed}x`);
+  setStatus(t('status.speed', { speed: simulationSpeed }));
   updateDebugStatus();
 };
 
@@ -562,15 +875,15 @@ rideToolButtons.forEach((button) => {
     const tool = button.dataset.rideTool as 'entrance' | 'exit';
     const ride = selectedRide();
     if (!ride) {
-      setStatus('Select a ride first');
+      setStatus(t('status.selectRideFirst'));
       return;
     }
     if (tool === 'entrance' && ride.entranceKey) {
-      setStatus('Entrance already placed');
+      setStatus(t('status.entranceAlready'));
       return;
     }
     if (tool === 'exit' && ride.exitKey) {
-      setStatus('Exit already placed');
+      setStatus(t('status.exitAlready'));
       return;
     }
     setTool(tool);
@@ -746,7 +1059,7 @@ const addPath = (coord: GridCoord, silent = false) => {
   paths.set(key, path);
   refreshQueueVisualsAround(coord);
 
-  if (!silent) setStatus(`Path built at ${key}`);
+  if (!silent) setStatus(t('status.pathBuilt', { key }));
   refreshStats();
   updateSelectedRidePanel();
   return true;
@@ -966,7 +1279,7 @@ const connectQueueEntryToPath = (queueKey: string, pathKey: string, silent = fal
   refreshQueueVisualsAround(parseKey(queueKey));
   updateSelectedRidePanel();
   resetInvalidGuests();
-  if (!silent) setStatus(`Queue entry connected at ${pathKey}`);
+  if (!silent) setStatus(t('status.queueEntryConnected', { key: pathKey }));
   return true;
 };
 
@@ -993,8 +1306,8 @@ const addQueuePath = (coord: GridCoord, silent = false) => {
     const hasAdjacentPath = adjacentKeys(coord).some((pathKey) => paths.has(pathKey));
     setStatus(
       queuePath.nextKey
-        ? `Queue path built at ${key}${hasAdjacentPath ? ' · click adjacent path to set entry' : ''}`
-        : `Queue path built at ${key} · connect from entrance`,
+        ? t('status.queueBuilt', { key, hint: hasAdjacentPath ? t('status.queueBuiltHint') : '' })
+        : t('status.queueBuiltConnectEntrance', { key }),
     );
   }
   refreshStats();
@@ -1090,10 +1403,10 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
   if (!silent) {
     if (kind === 'entrance' && !ride.exitKey) {
       setTool('exit');
-      setStatus(`Entrance placed · place Carousel ${ride.id.split('-')[1]} exit`);
+      setStatus(t('status.entrancePlacedNextExit', { ride: rideLabel(ride) }));
     } else {
       setTool('select');
-      setStatus(`${kind === 'entrance' ? 'Entrance' : 'Exit'} placed for Carousel ${ride.id.split('-')[1]}`);
+      setStatus(t('status.gatePlaced', { kind: t(`ride.${kind}`), ride: rideLabel(ride) }));
     }
   }
   return true;
@@ -1128,7 +1441,7 @@ const addTree = (coord: GridCoord, silent = false) => {
   const tree = createTree(coord);
   buildGroup.add(tree);
   trees.set(key, tree);
-  if (!silent) setStatus(`Tree planted at ${key}`);
+  if (!silent) setStatus(t('status.treePlanted', { key }));
   return true;
 };
 
@@ -1356,7 +1669,7 @@ const addCarousel = (coord: GridCoord, silent = false) => {
   updateSelectedRidePanel();
   if (!silent) {
     setTool('entrance');
-    setStatus(`Carousel set installed · place entrance`);
+    setStatus(t('status.carouselInstalled'));
   }
   refreshStats();
   return true;
@@ -1379,7 +1692,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
-    setStatus(`Path removed at ${key}`);
+    setStatus(t('status.pathRemoved', { key }));
     return 'path';
   }
 
@@ -1395,7 +1708,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
-    setStatus(`Queue path removed at ${key}`);
+    setStatus(t('status.queueRemoved', { key }));
     return 'queue';
   }
 
@@ -1411,7 +1724,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     refreshQueueVisualsAround(coord);
     resetInvalidGuests();
     updateSelectedRidePanel();
-    setStatus('Entrance removed');
+    setStatus(t('status.entranceRemoved'));
     return 'entrance';
   }
 
@@ -1422,7 +1735,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     buildGroup.remove(exit.mesh);
     exits.delete(key);
     updateSelectedRidePanel();
-    setStatus('Exit removed');
+    setStatus(t('status.exitRemoved'));
     return 'exit';
   }
 
@@ -1430,7 +1743,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
   if (tree) {
     buildGroup.remove(tree);
     trees.delete(key);
-    setStatus(`Tree removed at ${key}`);
+    setStatus(t('status.treeRemoved', { key }));
     return 'tree';
   }
 
@@ -1457,11 +1770,11 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     if (selectedRideId === rideId) selectedRideId = null;
     refreshStats();
     updateSelectedRidePanel();
-    setStatus('Ride removed');
+    setStatus(t('status.rideRemoved'));
     return 'ride';
   }
 
-  setStatus('Nothing to remove');
+  setStatus(t('status.nothingToRemove'));
   return null;
 };
 
@@ -1662,7 +1975,7 @@ const completeBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.pause = 0;
   guest.mesh.visible = false;
   updateSelectedRidePanel();
-  debug(`Carousel ${ride.id.split('-')[1]} boarded guest (${ride.riders}/${carouselSeatCount})`);
+  debug(t('debug.boarded', { ride: rideLabel(ride), riders: ride.riders, capacity: carouselSeatCount }));
 };
 
 const boardingTargetForRide = (ride: Ride) => {
@@ -1690,7 +2003,7 @@ const startBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.mesh.visible = true;
   guest.money = Math.max(0, guest.money - 2.5);
   guest.happiness = clamp(guest.happiness + 4, 0, 100);
-  debug(`Carousel ${ride.id.split('-')[1]} boarding guest`);
+  debug(t('debug.boarding', { ride: rideLabel(ride) }));
 };
 
 const tryBoardRide = (guest: Guest, key: string) => {
@@ -1715,7 +2028,7 @@ const tryBoardRide = (guest: Guest, key: string) => {
 
   const queueSlot = queueSlotForRide(ride);
   if (!queueSlot) {
-    debug(`Carousel ${ride.id.split('-')[1]} queue full; guest left`);
+    debug(t('debug.queueFullLeft', { ride: rideLabel(ride) }));
     guest.pause = 0.6;
     guest.to = chooseNextPath(key);
     return false;
@@ -1734,7 +2047,7 @@ const tryBoardRide = (guest: Guest, key: string) => {
   guest.mesh.visible = true;
   placeGuestInQueueSlot(guest, ride, queueSlot.key, queueSlot.slotIndex);
   updateSelectedRidePanel();
-  debug(`Guest waiting for Carousel ${ride.id.split('-')[1]}`);
+  debug(t('debug.waiting', { ride: rideLabel(ride) }));
   return true;
 };
 
@@ -1788,7 +2101,7 @@ const compactQueueForRide = (ride: Ride) => {
     const slot = queueSlotsForRide(ride)[index];
     if (!slot || (guest.queueKey === slot.key && guest.queueSlotIndex === slot.slotIndex)) return;
     sendGuestToQueueSlot(guest, ride, slot.key, slot.slotIndex);
-    debug(`Carousel ${ride.id.split('-')[1]} queue moved forward`);
+    debug(t('debug.queueMoved', { ride: rideLabel(ride) }));
   });
 };
 
@@ -1823,7 +2136,7 @@ const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
 
   const queueSlot = queueSlotForRide(ride);
   if (!queueSlot) {
-    debug(`Carousel ${ride.id.split('-')[1]} queue full; guest kept walking`);
+    debug(t('debug.queueFullWalking', { ride: rideLabel(ride) }));
     guest.pause = 0.6;
     guest.to = chooseNextPath(pathKey);
     return false;
@@ -1836,7 +2149,7 @@ const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
   guest.queueRoute = queueRoute;
   updateSelectedRidePanel();
   compactQueueForRide(ride);
-  debug(`Guest walking into Carousel ${ride.id.split('-')[1]} queue`);
+  debug(t('debug.walkingIntoQueue', { ride: rideLabel(ride) }));
   return true;
 };
 
@@ -1867,7 +2180,7 @@ const updateGateAnimations = (delta: number) => {
 };
 
 const setRidePhase = (ride: Ride, phase: RidePhase, timer: number) => {
-  if (ride.phase !== phase) debug(`Carousel ${ride.id.split('-')[1]} ${phase.toUpperCase()}`);
+  if (ride.phase !== phase) debug(t('debug.phase', { ride: rideLabel(ride), phase: phaseLabel(phase).toUpperCase() }));
   ride.phase = phase;
   ride.phaseTimer = timer;
   updateSelectedRidePanel();
@@ -1918,7 +2231,7 @@ const updateRideSystems = (delta: number) => {
         .filter((guest) => guest.state === 'riding' && guest.rideId === ride.id)
         .forEach((guest) => finishRide(guest));
       setRidePhase(ride, 'idle', 0);
-      debug(`Carousel ${ride.id.split('-')[1]} unloaded riders`);
+      debug(t('debug.unloaded', { ride: rideLabel(ride) }));
     }
   });
 };
@@ -2123,7 +2436,7 @@ const updateGuests = (delta: number) => {
       guest.queueMoveStart = undefined;
       guest.boardingTarget = undefined;
       placeGuestInQueueSlot(guest, ride, guest.queueKey, guest.queueSlotIndex);
-      debug(`Guest reached Carousel ${guest.rideId.split('-')[1]} queue slot`);
+      debug(t('debug.reachedQueueSlot', { ride: rideLabel(guest.rideId) }));
       return;
     }
 
@@ -2260,6 +2573,7 @@ const seedPark = () => {
 
   for (let i = 0; i < 24; i += 1) spawnGuest();
   for (let i = 0; i < 4; i += 1) spawnGuest('4,2');
+  selectedRideId = null;
   refreshStats();
 };
 
@@ -2270,18 +2584,18 @@ const selectRideAt = (coord: GridCoord) => {
   updateDebugStatus();
 
   if (rideId) {
-    setStatus('Carousel selected');
+    setStatus(t('status.carouselSelected'));
     return true;
   }
 
-  setStatus('Selection cleared');
+  setStatus(t('status.selectionCleared'));
   return false;
 };
 
 const selectGuest = (guest: Guest) => {
   selectedGuestId = guest.id;
   updateSelectedGuestWindow();
-  setStatus(`Guest #${guest.id} selected`);
+  setStatus(t('status.guestSelected', { guest: guestLabel(guest) }));
 };
 
 const updatePointerFromEvent = (event: PointerEvent) => {
@@ -2345,7 +2659,7 @@ const handleBuild = (event: PointerEvent) => {
     lastDragX = event.clientX;
     lastDragY = event.clientY;
     canvas.setPointerCapture(event.pointerId);
-    setStatus('Pan camera');
+    setStatus(t('status.panCamera'));
     return;
   }
 
@@ -2370,7 +2684,7 @@ const handleBuild = (event: PointerEvent) => {
   }
 
   if (activeTool === 'queue' && paths.has(hoverKey)) {
-    if (!connectQueueEntryFromPath(hoverKey)) setStatus('Click a path beside the queue tail');
+    if (!connectQueueEntryFromPath(hoverKey)) setStatus(t('status.clickPathBesideQueue'));
     updatePreview();
     return;
   }
@@ -2433,7 +2747,7 @@ const setSelectedRideOpen = (isOpen: boolean) => {
   if (!ride) return;
   ride.isOpen = isOpen;
   updateSelectedRidePanel();
-  setStatus(ride.isOpen ? 'Ride opened' : 'Ride closed');
+  setStatus(ride.isOpen ? t('status.rideOpened') : t('status.rideClosed'));
 };
 
 rideOpenButton.addEventListener('click', () => setSelectedRideOpen(true));
@@ -2442,13 +2756,22 @@ guestFollowButton.addEventListener('click', () => {
   const guest = selectedGuest();
   if (!guest) return;
   setGuestFollow(!followSelectedGuest);
-  setStatus(followSelectedGuest ? `Following Guest #${guest.id}` : `Guest #${guest.id} follow off`);
+  setStatus(t(followSelectedGuest ? 'status.followOn' : 'status.followOff', { guest: guestLabel(guest) }));
 });
 guestCloseButton.addEventListener('click', () => {
   selectedGuestId = null;
   setGuestFollow(false);
   updateSelectedGuestWindow();
-  setStatus('Guest window closed');
+  setStatus(t('status.guestWindowClosed'));
+});
+
+languageSelect.addEventListener('change', () => {
+  language = languageSelect.value === 'en' ? 'en' : 'ko';
+  applyStaticTranslations();
+  updateSelectedRidePanel();
+  updateSelectedGuestWindow();
+  updateDebugStatus();
+  setStatus(t('status.language'));
 });
 
 continuousRotationToggle.addEventListener('change', () => {
@@ -2457,31 +2780,21 @@ continuousRotationToggle.addEventListener('change', () => {
   if (!continuousRotationEnabled) {
     pressedRotationKeys.clear();
     snapCameraToNearestQuarter();
-    setStatus('Quarter view rotation');
+    setStatus(t('status.quarterRotation'));
     return;
   }
 
-  setStatus('Continuous QE rotation');
+  setStatus(t('status.continuousRotation'));
 });
 
 const toolStatusLabel = (tool: Tool) => {
-  const labels: Record<Tool, string> = {
-    select: 'Select tool selected',
-    path: 'Path tool selected',
-    queue: 'Queue path tool selected',
-    carousel: 'Carousel prefab selected',
-    entrance: 'Entrance tool selected',
-    exit: 'Exit tool selected',
-    tree: 'Tree tool selected',
-    bulldoze: 'Bulldoze tool selected',
-  };
-  return labels[tool];
+  return t(`toolStatus.${tool}`);
 };
 
 pauseButton.addEventListener('click', () => {
   isPaused = !isPaused;
-  pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
-  setStatus(isPaused ? 'Simulation paused' : toolStatusLabel(activeTool));
+  pauseButton.textContent = isPaused ? t('pause.resume') : t('pause.pause');
+  setStatus(isPaused ? t('status.paused') : toolStatusLabel(activeTool));
 });
 
 const setViewport = () => {
@@ -2598,7 +2911,7 @@ canvas.addEventListener(
     event.preventDefault();
     cameraZoom = clamp(cameraZoom * (event.deltaY > 0 ? 0.9 : 1.1), 0.55, 2.4);
     setViewport();
-    setStatus(`Zoom ${Math.round(cameraZoom * 100)}%`);
+    setStatus(t('status.zoom', { zoom: Math.round(cameraZoom * 100) }));
   },
   { passive: false },
 );
@@ -2619,7 +2932,7 @@ window.addEventListener('keydown', (event) => {
   if (event.repeat) return;
   cameraYaw += key === 'q' ? quarterYawStep : -quarterYawStep;
   updateCameraAngle();
-  setStatus(`View rotated ${key.toUpperCase()}`);
+  setStatus(t('status.viewRotated', { key: key.toUpperCase() }));
 });
 
 window.addEventListener('keydown', (event) => {
@@ -2642,6 +2955,7 @@ window.addEventListener('keyup', (event) => {
 window.addEventListener('resize', setViewport);
 updateCameraAngle();
 setViewport();
+applyStaticTranslations();
 seedPark();
 setTool('select');
 updateSelectedRidePanel();

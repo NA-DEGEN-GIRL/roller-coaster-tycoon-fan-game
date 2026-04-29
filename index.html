@@ -1,82 +1,90 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RCT Three.js Prototype</title>
+    <title>RCT Three.js 프로토타입</title>
   </head>
   <body>
     <div id="app">
-      <aside class="tool-panel" aria-label="Park tools">
+      <aside class="tool-panel" aria-label="놀이공원 도구" data-i18n-aria="aria.parkTools">
         <div class="brand">
           <span class="brand-mark"></span>
           <div>
-            <h1>Park Builder</h1>
-            <p>Prefab park simulation</p>
+            <h1 data-i18n="brand.title">파크 빌더</h1>
+            <p data-i18n="brand.subtitle">프리팹 놀이공원 시뮬레이션</p>
           </div>
         </div>
 
         <div class="panel-section">
-          <span class="section-label">Build</span>
-          <div class="tool-grid" role="group" aria-label="Build tools">
-            <button class="tool is-active" type="button" title="Select" data-tool="select">
+          <span class="section-label" data-i18n="language.label">언어</span>
+          <select id="language-select" class="language-select" aria-label="언어 선택" data-i18n-aria="aria.languageSelect">
+            <option value="ko">한국어</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+
+        <div class="panel-section">
+          <span class="section-label" data-i18n="section.build">건설</span>
+          <div class="tool-grid" role="group" aria-label="건설 도구" data-i18n-aria="aria.buildTools">
+            <button class="tool is-active" type="button" title="선택" data-i18n-title="tool.select" data-tool="select">
               <span class="icon select-icon"></span>
             </button>
-            <button class="tool" type="button" title="Path" data-tool="path">
+            <button class="tool" type="button" title="길" data-i18n-title="tool.path" data-tool="path">
               <span class="icon path-icon"></span>
             </button>
-            <button class="tool" type="button" title="Queue path" data-tool="queue">
+            <button class="tool" type="button" title="대기줄 길" data-i18n-title="tool.queue" data-tool="queue">
               <span class="icon queue-icon"></span>
             </button>
-            <button class="tool" type="button" title="Carousel set" data-tool="carousel">
+            <button class="tool" type="button" title="회전목마 세트" data-i18n-title="tool.carousel" data-tool="carousel">
               <span class="icon carousel-icon"></span>
             </button>
-            <button class="tool" type="button" title="Trees" data-tool="tree">
+            <button class="tool" type="button" title="나무" data-i18n-title="tool.tree" data-tool="tree">
               <span class="icon tree-icon"></span>
             </button>
-            <button class="tool" type="button" title="Bulldoze" data-tool="bulldoze">
+            <button class="tool" type="button" title="철거" data-i18n-title="tool.bulldoze" data-tool="bulldoze">
               <span class="icon bulldoze-icon"></span>
             </button>
           </div>
         </div>
 
         <div class="panel-section ride-panel">
-          <span class="section-label">Selected Ride</span>
+          <span class="section-label" data-i18n="section.selectedRide">선택한 놀이기구</span>
           <div class="ride-card">
             <div>
-              <strong id="selected-ride-name">No ride selected</strong>
-              <span id="selected-ride-status">Place or click a carousel</span>
+              <strong id="selected-ride-name">선택한 놀이기구 없음</strong>
+              <span id="selected-ride-status">회전목마를 설치하거나 클릭하세요</span>
             </div>
-            <div class="ride-state-toggle" aria-label="Ride operating state">
-              <button id="ride-open-button" class="ride-state-button open" type="button" disabled>Open</button>
-              <button id="ride-close-button" class="ride-state-button closed is-active" type="button" disabled>Closed</button>
+            <div class="ride-state-toggle" aria-label="놀이기구 운영 상태" data-i18n-aria="aria.rideState">
+              <button id="ride-open-button" class="ride-state-button open" type="button" disabled data-i18n="ride.open">오픈</button>
+              <button id="ride-close-button" class="ride-state-button closed is-active" type="button" disabled data-i18n="ride.closed">닫힘</button>
             </div>
-            <div class="ride-actions" aria-label="Selected ride placement tools">
-              <button id="place-entrance-button" class="ride-action" type="button" title="Place entrance" disabled data-ride-tool="entrance">
+            <div class="ride-actions" aria-label="선택한 놀이기구 배치 도구" data-i18n-aria="aria.rideTools">
+              <button id="place-entrance-button" class="ride-action" type="button" title="입구 설치" data-i18n-title="ride.placeEntrance" disabled data-ride-tool="entrance">
                 <span class="icon entrance-icon"></span>
-                <span>Entrance</span>
+                <span data-i18n="ride.entrance">입구</span>
               </button>
-              <button id="place-exit-button" class="ride-action" type="button" title="Place exit" disabled data-ride-tool="exit">
+              <button id="place-exit-button" class="ride-action" type="button" title="출구 설치" data-i18n-title="ride.placeExit" disabled data-ride-tool="exit">
                 <span class="icon exit-icon"></span>
-                <span>Exit</span>
+                <span data-i18n="ride.exit">출구</span>
               </button>
             </div>
           </div>
         </div>
 
         <div class="panel-section camera-panel">
-          <span class="section-label">Camera</span>
+          <span class="section-label" data-i18n="section.camera">카메라</span>
           <div class="ride-card">
             <label class="toggle-row">
               <input id="continuous-rotation-toggle" type="checkbox" />
-              <span>Continuous QE</span>
+              <span data-i18n="camera.continuous">연속 Q/E 회전</span>
             </label>
           </div>
         </div>
 
         <div class="panel-section simulation-panel">
-          <span class="section-label">Simulation</span>
-          <div class="speed-control" aria-label="Simulation speed">
+          <span class="section-label" data-i18n="section.simulation">시뮬레이션</span>
+          <div class="speed-control" aria-label="시뮬레이션 속도" data-i18n-aria="aria.simulationSpeed">
             <button class="speed-button is-active" type="button" data-speed="1">1x</button>
             <button class="speed-button" type="button" data-speed="2">2x</button>
             <button class="speed-button" type="button" data-speed="4">4x</button>
@@ -85,42 +93,42 @@
         </div>
 
         <div class="panel-section stats">
-          <span class="section-label">Park</span>
-          <div><span>Guests</span><strong id="guest-count">0</strong></div>
-          <div><span>Paths</span><strong id="path-count">0</strong></div>
-          <div><span>Queues</span><strong id="queue-count">0</strong></div>
-          <div><span>Rides</span><strong id="ride-count">0</strong></div>
-          <div><span>Rating</span><strong>82%</strong></div>
+          <span class="section-label" data-i18n="section.park">공원</span>
+          <div><span data-i18n="stats.guests">손님</span><strong id="guest-count">0</strong></div>
+          <div><span data-i18n="stats.paths">길</span><strong id="path-count">0</strong></div>
+          <div><span data-i18n="stats.queues">대기줄</span><strong id="queue-count">0</strong></div>
+          <div><span data-i18n="stats.rides">놀이기구</span><strong id="ride-count">0</strong></div>
+          <div><span data-i18n="stats.rating">평점</span><strong>82%</strong></div>
         </div>
       </aside>
 
       <main class="viewport-wrap">
-        <canvas id="scene" aria-label="Isometric 3D amusement park builder"></canvas>
-        <section id="guest-window" class="guest-window" aria-label="Selected guest" hidden>
+        <canvas id="scene" aria-label="아이소메트릭 3D 놀이공원 빌더" data-i18n-aria="aria.scene"></canvas>
+        <section id="guest-window" class="guest-window" aria-label="선택한 손님" data-i18n-aria="aria.selectedGuest" hidden>
           <div class="guest-window-header">
-            <strong id="guest-window-title">Guest #0</strong>
-            <button id="guest-close-button" type="button" title="Close guest window">x</button>
+            <strong id="guest-window-title">손님 #0</strong>
+            <button id="guest-close-button" type="button" title="손님 창 닫기" data-i18n-title="guest.closeWindow">x</button>
           </div>
           <div class="guest-window-body">
-            <span id="guest-status-text">Walking around</span>
-            <div class="guest-metrics" aria-label="Guest status">
-              <div><span>Money</span><strong id="guest-money">$0</strong></div>
-              <div><span>Hunger</span><strong id="guest-hunger">0%</strong></div>
-              <div><span>Tiredness</span><strong id="guest-tiredness">0%</strong></div>
-              <div><span>Happiness</span><strong id="guest-happiness">0%</strong></div>
-              <div><span>Nausea</span><strong id="guest-nausea">0%</strong></div>
+            <span id="guest-status-text">공원을 걷는 중</span>
+            <div class="guest-metrics" aria-label="손님 상태" data-i18n-aria="aria.guestStatus">
+              <div><span data-i18n="guest.money">돈</span><strong id="guest-money">$0</strong></div>
+              <div><span data-i18n="guest.hunger">배고픔</span><strong id="guest-hunger">0%</strong></div>
+              <div><span data-i18n="guest.tiredness">피곤함</span><strong id="guest-tiredness">0%</strong></div>
+              <div><span data-i18n="guest.happiness">행복도</span><strong id="guest-happiness">0%</strong></div>
+              <div><span data-i18n="guest.nausea">멀미</span><strong id="guest-nausea">0%</strong></div>
             </div>
-            <button id="guest-follow-button" class="guest-follow-button" type="button">Follow camera</button>
+            <button id="guest-follow-button" class="guest-follow-button" type="button">카메라로 따라가기</button>
           </div>
         </section>
         <div class="status-bar">
-          <span id="status-text">Select tool selected</span>
-          <button id="pause-button" type="button">Pause</button>
+          <span id="status-text">선택 도구 선택됨</span>
+          <button id="pause-button" type="button">일시정지</button>
         </div>
-        <section class="debug-console" aria-label="Debug console">
+        <section class="debug-console" aria-label="디버그 콘솔" data-i18n-aria="aria.debugConsole">
           <div class="debug-header">
             <strong>DEBUG</strong>
-            <span id="debug-status">Simulation booting</span>
+            <span id="debug-status">시뮬레이션 시작 중</span>
           </div>
           <pre id="debug-log"></pre>
         </section>

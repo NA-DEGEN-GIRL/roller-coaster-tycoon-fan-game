@@ -98,6 +98,19 @@ button {
   gap: 8px;
 }
 
+.language-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #263844;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .tool {
   display: grid;
   width: 48px;
