@@ -41,7 +41,7 @@ type Guest = {
   progress: number;
   speed: number;
   pause: number;
-  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'seeking';
+  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'seeking' | 'leaving';
   money: number;
   hunger: number;
   tiredness: number;
@@ -52,6 +52,8 @@ type Guest = {
   queueSlotIndex?: number;
   queueRoute?: string[];
   queueRouteIndex?: number;
+  pathRoute?: string[];
+  pathRouteIndex?: number;
   queueMoveStart?: THREE.Vector3;
   boardingTarget?: THREE.Vector3;
   wanderTarget?: THREE.Vector3;
@@ -122,6 +124,16 @@ type Ride = {
   phaseTimer: number;
 };
 
+type ParkEntrance = {
+  group: THREE.Group;
+  entryPathKey: string;
+  outsideKey: string;
+  isOpen: boolean;
+  statusLight: THREE.Mesh;
+  gates: THREE.Group[];
+  openAmount: number;
+};
+
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button');
 const statusText = document.querySelector<HTMLSpanElement>('#status-text');
@@ -130,6 +142,10 @@ const pathCount = document.querySelector<HTMLElement>('#path-count');
 const queueCount = document.querySelector<HTMLElement>('#queue-count');
 const rideCount = document.querySelector<HTMLElement>('#ride-count');
 const ridePanel = document.querySelector<HTMLElement>('.ride-panel');
+const parkEntrancePanel = document.querySelector<HTMLElement>('.park-entrance-panel');
+const parkEntranceStatus = document.querySelector<HTMLElement>('#park-entrance-status');
+const parkEntranceOpenButton = document.querySelector<HTMLButtonElement>('#park-entrance-open-button');
+const parkEntranceCloseButton = document.querySelector<HTMLButtonElement>('#park-entrance-close-button');
 const selectedRideName = document.querySelector<HTMLElement>('#selected-ride-name');
 const selectedRideStatus = document.querySelector<HTMLElement>('#selected-ride-status');
 const rideOpenButton = document.querySelector<HTMLButtonElement>('#ride-open-button');
@@ -166,6 +182,10 @@ if (
   !queueCount ||
   !rideCount ||
   !ridePanel ||
+  !parkEntrancePanel ||
+  !parkEntranceStatus ||
+  !parkEntranceOpenButton ||
+  !parkEntranceCloseButton ||
   !selectedRideName ||
   !selectedRideStatus ||
   !rideOpenButton ||
@@ -327,11 +347,13 @@ const occupied = new Map<string, string>();
 const entrances = new Map<string, RideGate>();
 const exits = new Map<string, RideGate>();
 const guests: Guest[] = [];
+let parkEntrance: ParkEntrance | null = null;
 
 let activeTool: Tool = 'select';
 let hoveredTile: GridCoord | null = null;
 let previousHoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
+let selectedParkEntrance = false;
 let selectedGuestId: number | null = null;
 let isPaused = false;
 let simulationSpeed = 1;
@@ -359,6 +381,7 @@ let continuousRotationEnabled = false;
 let audioContext: AudioContext | null = null;
 let masterMusicGain: GainNode | null = null;
 let crowdAudio: CrowdAudioState | null = null;
+let guestSpawnTimer = 2.5;
 
 const keyOf = (x: number, z: number) => `${x},${z}`;
 
@@ -397,6 +420,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.rideMusic': '놀이기구 음악 상태',
     'aria.rideMusicPreset': '회전목마 음악 선택',
     'aria.rideTools': '선택한 놀이기구 배치 도구',
+    'aria.parkEntranceState': '공원 입구 운영 상태',
     'aria.simulationSpeed': '시뮬레이션 속도',
     'aria.scene': '아이소메트릭 3D 놀이공원 빌더',
     'aria.selectedGuest': '선택한 손님',
@@ -407,6 +431,7 @@ const translations: Record<Language, Record<string, string>> = {
     'language.label': '언어',
     'section.build': '건설',
     'section.selectedRide': '선택한 놀이기구',
+    'section.parkEntrance': '공원 입구',
     'section.camera': '카메라',
     'section.simulation': '시뮬레이션',
     'section.park': '공원',
@@ -445,6 +470,11 @@ const translations: Record<Language, Record<string, string>> = {
     'ride.connectExit': '출구를 일반 길과 연결하세요',
     'ride.riding': '탑승 중',
     'ride.carouselName': '회전목마',
+    'parkEntrance.name': '메인 입구',
+    'parkEntrance.open': '오픈',
+    'parkEntrance.close': '클로즈',
+    'parkEntrance.openStatus': '공원 오픈 · 손님 입장 중',
+    'parkEntrance.closedStatus': '공원 클로즈 · 손님 퇴장 중',
     'music.fairgroundOrgan': '페어그라운드 오르간',
     'music.waltzOrgan': '왈츠 오르간',
     'music.musicBox': '오르골',
@@ -471,6 +501,7 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.riding': '놀이기구 탑승 중',
     'guest.exiting': '놀이기구에서 나오는 중',
     'guest.seeking': '길을 찾는 중',
+    'guest.leaving': '공원 밖으로 나가는 중',
     'pause.pause': '일시정지',
     'pause.resume': '재개',
     'debug.noRide': '손님 {guests}명 · 선택한 놀이기구 없음',
@@ -510,6 +541,11 @@ const translations: Record<Language, Record<string, string>> = {
     'status.followOn': '{guest} 카메라 추적 중',
     'status.followOff': '{guest} 카메라 추적 끔',
     'status.guestWindowClosed': '손님 창 닫힘',
+    'status.parkEntranceSelected': '공원 입구 선택됨',
+    'status.parkOpened': '공원 오픈 · 새 손님 입장',
+    'status.parkClosed': '공원 클로즈 · 손님 퇴장',
+    'status.guestEnteredPark': '{guest} 입장',
+    'status.guestLeftPark': '{guest} 퇴장',
     'status.quarterRotation': '쿼터뷰 회전',
     'status.continuousRotation': '연속 Q/E 회전',
     'status.paused': '시뮬레이션 일시정지',
@@ -539,6 +575,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.rideMusic': 'Ride music state',
     'aria.rideMusicPreset': 'Carousel music selection',
     'aria.rideTools': 'Selected ride placement tools',
+    'aria.parkEntranceState': 'Park entrance operating state',
     'aria.simulationSpeed': 'Simulation speed',
     'aria.scene': 'Isometric 3D amusement park builder',
     'aria.selectedGuest': 'Selected guest',
@@ -549,6 +586,7 @@ const translations: Record<Language, Record<string, string>> = {
     'language.label': 'Language',
     'section.build': 'Build',
     'section.selectedRide': 'Selected Ride',
+    'section.parkEntrance': 'Park Entrance',
     'section.camera': 'Camera',
     'section.simulation': 'Simulation',
     'section.park': 'Park',
@@ -587,6 +625,11 @@ const translations: Record<Language, Record<string, string>> = {
     'ride.connectExit': 'Connect exit to path',
     'ride.riding': 'riding',
     'ride.carouselName': 'Carousel',
+    'parkEntrance.name': 'Main Entrance',
+    'parkEntrance.open': 'Open',
+    'parkEntrance.close': 'Close',
+    'parkEntrance.openStatus': 'Park open · guests entering',
+    'parkEntrance.closedStatus': 'Park closed · guests leaving',
     'music.fairgroundOrgan': 'Fairground Organ',
     'music.waltzOrgan': 'Waltz Organ',
     'music.musicBox': 'Music Box',
@@ -613,6 +656,7 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.riding': 'On a ride',
     'guest.exiting': 'Leaving a ride',
     'guest.seeking': 'Looking for a path',
+    'guest.leaving': 'Leaving the park',
     'pause.pause': 'Pause',
     'pause.resume': 'Resume',
     'debug.noRide': 'Guests {guests} · no ride selected',
@@ -652,6 +696,11 @@ const translations: Record<Language, Record<string, string>> = {
     'status.followOn': 'Following {guest}',
     'status.followOff': '{guest} follow off',
     'status.guestWindowClosed': 'Guest window closed',
+    'status.parkEntranceSelected': 'Park entrance selected',
+    'status.parkOpened': 'Park opened · new guests entering',
+    'status.parkClosed': 'Park closed · guests leaving',
+    'status.guestEnteredPark': '{guest} entered',
+    'status.guestLeftPark': '{guest} left',
     'status.quarterRotation': 'Quarter view rotation',
     'status.continuousRotation': 'Continuous QE rotation',
     'status.paused': 'Simulation paused',
@@ -1146,7 +1195,22 @@ const formatGuestStatus = (guest: Guest) => {
   if (guest.state === 'boarding') return t('guest.boarding');
   if (guest.state === 'riding') return t('guest.riding');
   if (guest.state === 'exiting') return t('guest.exiting');
+  if (guest.state === 'leaving') return t('guest.leaving');
   return t('guest.seeking');
+};
+
+const updateParkEntrancePanel = () => {
+  if (!selectedParkEntrance || !parkEntrance) {
+    selectedParkEntrance = false;
+    parkEntrancePanel.hidden = true;
+    return;
+  }
+
+  parkEntrancePanel.hidden = false;
+  parkEntranceStatus.textContent = t(parkEntrance.isOpen ? 'parkEntrance.openStatus' : 'parkEntrance.closedStatus');
+  parkEntranceOpenButton.classList.toggle('is-active', parkEntrance.isOpen);
+  parkEntranceCloseButton.classList.toggle('is-active', !parkEntrance.isOpen);
+  parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
 };
 
 const setGuestFollow = (enabled: boolean) => {
@@ -1476,8 +1540,20 @@ const rideIdAt = (key: string) => occupied.get(key) ?? entrances.get(key)?.rideI
 
 const canSelectRideAt = (coord: GridCoord) => rideIdAt(keyOf(coord.x, coord.z)) !== null;
 
+const canSelectParkEntranceAt = (coord: GridCoord) => {
+  if (!parkEntrance) return false;
+  const key = keyOf(coord.x, coord.z);
+  return key === parkEntrance.outsideKey || key === parkEntrance.entryPathKey;
+};
+
 const isBlockedTile = (key: string) =>
-  occupied.has(key) || paths.has(key) || queuePaths.has(key) || trees.has(key) || entrances.has(key) || exits.has(key);
+  occupied.has(key) ||
+  paths.has(key) ||
+  queuePaths.has(key) ||
+  trees.has(key) ||
+  entrances.has(key) ||
+  exits.has(key) ||
+  key === parkEntrance?.outsideKey;
 
 const canPlacePath = ({ x, z }: GridCoord) => inBounds(x, z) && !isBlockedTile(keyOf(x, z));
 
@@ -1504,7 +1580,7 @@ const canPlaceRideGate = (coord: GridCoord, kind: 'entrance' | 'exit') => {
 };
 
 const canPlace = (tool: Tool, coord: GridCoord) => {
-  if (tool === 'select') return canSelectRideAt(coord);
+  if (tool === 'select') return canSelectRideAt(coord) || canSelectParkEntranceAt(coord);
   if (tool === 'path') return canPlacePath(coord);
   if (tool === 'queue') return canPlaceQueue(coord) || canConnectQueueEntryFromPath(keyOf(coord.x, coord.z));
   if (tool === 'tree') return canPlaceTree(coord);
@@ -1587,7 +1663,7 @@ const updatePreview = () => {
   }
 
   if (activeTool === 'select') {
-    selection.visible = canSelectRideAt(hoveredTile);
+    selection.visible = canSelectRideAt(hoveredTile) || canSelectParkEntranceAt(hoveredTile);
     selection.material = selectionMaterial;
     selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
     return;
@@ -1655,6 +1731,89 @@ const addPath = (coord: GridCoord, silent = false) => {
   refreshStats();
   updateSelectedRidePanel();
   return true;
+};
+
+const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
+  const outside = parseKey(outsideKey);
+  const entry = parseKey(entryPathKey);
+  const group = new THREE.Group();
+  group.userData.parkEntrance = true;
+  group.position.copy(worldPos(outside.x, outside.z, 0.05));
+
+  const direction = new THREE.Vector2(entry.x - outside.x, entry.z - outside.z);
+  if (direction.lengthSq() > 0) group.rotation.y = rotationYForDirection(direction.normalize());
+
+  const plaza = new THREE.Mesh(
+    new THREE.BoxGeometry(tileSize * 1.1, 0.08, tileSize * 1.1),
+    new THREE.MeshStandardMaterial({ color: 0xc8ad7f, roughness: 0.76 }),
+  );
+  plaza.position.y = 0.04;
+  plaza.receiveShadow = true;
+  group.add(plaza);
+
+  const boothMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.55 });
+  const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x30475e, roughness: 0.5 });
+  const metalMaterial = new THREE.MeshStandardMaterial({ color: 0xf0e6cf, roughness: 0.42, metalness: 0.12 });
+
+  [-0.58, 0.58].forEach((x) => {
+    const booth = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.86, 0.52), boothMaterial);
+    booth.position.set(x, 0.47, 0.1);
+    booth.castShadow = true;
+    booth.receiveShadow = true;
+    group.add(booth);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.18, 0.66), roofMaterial);
+    roof.position.set(x, 0.98, 0.1);
+    roof.castShadow = true;
+    group.add(roof);
+  });
+
+  const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.45, 0.16), roofMaterial);
+  leftPost.position.set(-0.92, 0.78, 0.38);
+  leftPost.castShadow = true;
+  group.add(leftPost);
+
+  const rightPost = leftPost.clone();
+  rightPost.position.x = 0.92;
+  group.add(rightPost);
+
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.16), roofMaterial);
+  sign.position.set(0, 1.48, 0.38);
+  sign.castShadow = true;
+  group.add(sign);
+
+  const statusLight = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), openMaterial);
+  statusLight.position.set(0, 1.76, 0.42);
+  statusLight.castShadow = true;
+  group.add(statusLight);
+
+  const gates: THREE.Group[] = [];
+  [-0.22, 0.22].forEach((x, index) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(index === 0 ? -0.22 : 0.22, 0.58, 0.44);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.08, 0.08), metalMaterial);
+    bar.position.x = index === 0 ? 0.24 : -0.24;
+    bar.castShadow = true;
+    pivot.add(bar);
+    gates.push(pivot);
+    group.add(pivot);
+  });
+
+  group.traverse((child) => {
+    child.userData.parkEntrance = true;
+  });
+
+  const entrance = {
+    group,
+    entryPathKey,
+    outsideKey,
+    isOpen: true,
+    statusLight,
+    gates,
+    openAmount: 1,
+  } satisfies ParkEntrance;
+  buildGroup.add(group);
+  return entrance;
 };
 
 const createQueueFence = (edge: QueueEdge) => {
@@ -2455,6 +2614,39 @@ const chooseNextPath = (from: string, previous?: string) => {
   return pool[Math.floor(Math.random() * pool.length)];
 };
 
+const findPathRoute = (startKey: string, goalKey: string) => {
+  if (!paths.has(startKey) || !paths.has(goalKey)) return null;
+  if (startKey === goalKey) return [startKey];
+
+  const visited = new Set<string>([startKey]);
+  const previous = new Map<string, string>();
+  const queue = [startKey];
+
+  while (queue.length > 0) {
+    const key = queue.shift();
+    if (!key) break;
+    for (const neighbor of neighborsOf(key)) {
+      if (visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      previous.set(neighbor, key);
+      if (neighbor === goalKey) {
+        const route = [goalKey];
+        let cursor = goalKey;
+        while (cursor !== startKey) {
+          const prev = previous.get(cursor);
+          if (!prev) return null;
+          route.unshift(prev);
+          cursor = prev;
+        }
+        return route;
+      }
+      queue.push(neighbor);
+    }
+  }
+
+  return null;
+};
+
 const exitPathForRide = (ride: Ride) => {
   if (!ride.exitKey) return randomPathKey();
   return adjacentKeys(parseKey(ride.exitKey)).find((key) => paths.has(key)) ?? randomPathKey();
@@ -2815,13 +3007,35 @@ const animateGate = (gate: RideGate | undefined, isOpen: boolean, delta: number)
   gate.bar.rotation.y = -gate.openAmount * (Math.PI / 2);
 };
 
+const animateParkEntrance = (delta: number) => {
+  const entrance = parkEntrance;
+  if (!entrance) return;
+  const target = entrance.isOpen ? 1 : 0;
+  const step = delta * 4.5;
+  entrance.openAmount += clamp(target - entrance.openAmount, -step, step);
+  entrance.gates.forEach((gate, index) => {
+    gate.rotation.y = (index === 0 ? -1 : 1) * entrance.openAmount * (Math.PI / 2);
+  });
+  entrance.statusLight.material = entrance.isOpen ? openMaterial : closedMaterial;
+};
+
 const updateGateAnimations = (delta: number) => {
+  animateParkEntrance(delta);
   rides.forEach((ride) => {
     const entrance = ride.entranceKey ? entrances.get(ride.entranceKey) : undefined;
     const exit = ride.exitKey ? exits.get(ride.exitKey) : undefined;
     animateGate(entrance, boardingGuestsForRide(ride).length > 0, delta);
     animateGate(exit, ride.phase === 'unloading' || exitingGuestsForRide(ride).length > 0, delta);
   });
+};
+
+const updateParkGuestSpawning = (delta: number) => {
+  if (!parkEntrance?.isOpen) return;
+  guestSpawnTimer -= delta;
+  if (guestSpawnTimer > 0) return;
+
+  if (guests.length < 60) spawnGuestAtParkEntrance();
+  guestSpawnTimer = 2.5 + Math.random() * 4.5;
 };
 
 const setRidePhase = (ride: Ride, phase: RidePhase, timer: number) => {
@@ -3026,6 +3240,8 @@ const clearGuestQueueState = (guest: Guest) => {
   guest.queueSlotIndex = undefined;
   guest.queueRoute = undefined;
   guest.queueRouteIndex = undefined;
+  guest.pathRoute = undefined;
+  guest.pathRouteIndex = undefined;
   guest.boardingTarget = undefined;
   guest.rideTime = 0;
 };
@@ -3047,6 +3263,53 @@ const sendGuestSeekingPath = (guest: Guest) => {
   guest.queueMoveStart = guest.mesh.position.clone();
   guest.wanderTarget = randomWanderTargetFrom(guest.mesh.position);
   guest.mesh.visible = true;
+};
+
+const removeGuest = (guest: Guest) => {
+  const index = guests.indexOf(guest);
+  if (index !== -1) guests.splice(index, 1);
+  guestGroup.remove(guest.mesh);
+  if (selectedGuestId === guest.id) {
+    selectedGuestId = null;
+    setGuestFollow(false);
+    updateSelectedGuestWindow();
+  }
+  refreshStats();
+};
+
+const leaveStartPathForGuest = (guest: Guest) => {
+  if (paths.has(guest.from)) return guest.from;
+  if (paths.has(guest.to)) return guest.to;
+  return nearestPathKeyFromPosition(guest.mesh.position);
+};
+
+const sendGuestLeavingPark = (guest: Guest) => {
+  if (!parkEntrance) return false;
+  if (guest.state === 'boarding' || guest.state === 'riding') return false;
+
+  const startKey = leaveStartPathForGuest(guest);
+  if (!startKey) {
+    sendGuestSeekingPath(guest);
+    return false;
+  }
+
+  const route = findPathRoute(startKey, parkEntrance.entryPathKey);
+  if (!route) {
+    sendGuestSeekingPath(guest);
+    return false;
+  }
+
+  clearGuestQueueState(guest);
+  guest.state = 'leaving';
+  guest.from = route[0];
+  guest.to = route[1] ?? route[0];
+  guest.pathRoute = route;
+  guest.pathRouteIndex = 0;
+  guest.queueMoveStart = guest.mesh.position.clone();
+  guest.progress = 0;
+  guest.pause = 0;
+  guest.mesh.visible = true;
+  return true;
 };
 
 const spawnGuest = (startKey?: string) => {
@@ -3075,11 +3338,45 @@ const spawnGuest = (startKey?: string) => {
   guests.push(guest);
 };
 
+const spawnGuestAtParkEntrance = () => {
+  if (!parkEntrance?.isOpen || !paths.has(parkEntrance.entryPathKey)) return false;
+
+  const id = ++guestSerial;
+  const mesh = createGuestMesh(id);
+  const guest: Guest = {
+    id,
+    mesh,
+    from: parkEntrance.outsideKey,
+    to: parkEntrance.entryPathKey,
+    progress: 0,
+    speed: 0.35 + Math.random() * 0.28,
+    pause: 0,
+    state: 'walking',
+    money: 32 + Math.random() * 68,
+    hunger: 8 + Math.random() * 22,
+    tiredness: 4 + Math.random() * 18,
+    happiness: 66 + Math.random() * 26,
+    nausea: Math.random() * 8,
+    rideTime: 0,
+  };
+  placeGuestAt(guest, parkEntrance.outsideKey);
+  guestGroup.add(mesh);
+  guests.push(guest);
+  refreshStats();
+  debug(t('status.guestEnteredPark', { guest: guestLabel(guest) }));
+  return true;
+};
+
 const resetInvalidGuests = () => {
   guests.forEach((guest) => {
     if (guest.state === 'boarding' || guest.state === 'riding') return;
     if (guest.state === 'seeking') return;
+    if (guest.state === 'leaving') {
+      sendGuestLeavingPark(guest);
+      return;
+    }
     if ((guest.state === 'queueing' || guest.state === 'waiting') && guest.queueKey && queuePaths.has(guest.queueKey)) return;
+    if (guest.from === parkEntrance?.outsideKey && paths.has(guest.to)) return;
     if (!isWalkway(guest.from) || !isWalkway(guest.to)) {
       sendGuestSeekingPath(guest);
     }
@@ -3105,7 +3402,8 @@ const updateGuestNeeds = (guest: Guest, delta: number) => {
 };
 
 const updateGuests = (delta: number) => {
-  guests.forEach((guest) => {
+  [...guests].forEach((guest) => {
+    if (!guests.includes(guest)) return;
     updateGuestNeeds(guest, delta);
 
     if (guest.state === 'boarding') {
@@ -3130,6 +3428,11 @@ const updateGuests = (delta: number) => {
     }
 
     if (guest.state === 'queueing') {
+      if (parkEntrance && !parkEntrance.isOpen) {
+        sendGuestLeavingPark(guest);
+        return;
+      }
+
       const route = guest.queueRoute;
       if (!guest.rideId || !guest.queueKey || guest.queueSlotIndex === undefined || !route || route.length === 0) {
         sendGuestSeekingPath(guest);
@@ -3175,10 +3478,58 @@ const updateGuests = (delta: number) => {
     }
 
     if (guest.state === 'waiting') {
+      if (parkEntrance && !parkEntrance.isOpen) {
+        sendGuestLeavingPark(guest);
+        return;
+      }
+
       const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
       if (ride && rideConnectionStatus(ride).ready && guest.queueKey && queuePaths.has(guest.queueKey)) return;
 
       sendGuestSeekingPath(guest);
+      return;
+    }
+
+    if (guest.state === 'leaving') {
+      if (!parkEntrance || !guest.pathRoute || guest.pathRoute.length === 0) {
+        sendGuestSeekingPath(guest);
+        return;
+      }
+
+      if (!paths.has(parkEntrance.entryPathKey) || !paths.has(guest.from) || !paths.has(guest.to)) {
+        sendGuestSeekingPath(guest);
+        return;
+      }
+
+      guest.progress += delta * guest.speed;
+      const from = parseKey(guest.from);
+      const to = parseKey(guest.to);
+      const fromPos = guest.queueMoveStart ?? worldPos(from.x, from.z, 0.12);
+      const toPos = worldPos(to.x, to.z, 0.12);
+      guest.mesh.position.lerpVectors(fromPos, toPos, Math.min(guest.progress, 1));
+      guest.mesh.rotation.y = Math.atan2(toPos.x - fromPos.x, toPos.z - fromPos.z);
+
+      if (guest.progress < 1) return;
+
+      guest.from = guest.to;
+      guest.queueMoveStart = undefined;
+      placeGuestAt(guest, guest.from);
+      if (guest.from === parkEntrance.entryPathKey) {
+        debug(t('status.guestLeftPark', { guest: guestLabel(guest) }));
+        removeGuest(guest);
+        return;
+      }
+
+      const routeIndex = guest.pathRouteIndex ?? 0;
+      const nextIndex = routeIndex + 1;
+      if (nextIndex >= guest.pathRoute.length) {
+        sendGuestLeavingPark(guest);
+        return;
+      }
+
+      guest.pathRouteIndex = nextIndex;
+      guest.to = guest.pathRoute[nextIndex + 1] ?? parkEntrance.entryPathKey;
+      guest.progress = 0;
       return;
     }
 
@@ -3218,6 +3569,11 @@ const updateGuests = (delta: number) => {
       return;
     }
 
+    if (parkEntrance && !parkEntrance.isOpen && guest.state === 'walking') {
+      sendGuestLeavingPark(guest);
+      return;
+    }
+
     if (guest.pause > 0) {
       guest.pause -= delta;
       return;
@@ -3252,6 +3608,7 @@ const updateGuests = (delta: number) => {
 
 const seedPark = () => {
   [
+    [-9, 2],
     [-8, 2],
     [-7, 2],
     [-6, 2],
@@ -3281,6 +3638,8 @@ const seedPark = () => {
     [7, 1],
   ].forEach(([x, z]) => addPath({ x, z }, true));
 
+  parkEntrance = createParkEntrance('-10,2', '-9,2');
+
   addCarousel({ x: 4, z: -5 }, true);
   addRideGate({ x: 4, z: -3 }, 'entrance', true);
   addRideGate({ x: 6, z: -5 }, 'exit', true);
@@ -3308,14 +3667,18 @@ const seedPark = () => {
   createAudioTestZones();
 
   for (let i = 0; i < 24; i += 1) spawnGuest();
+  for (let i = 0; i < 4; i += 1) spawnGuestAtParkEntrance();
   for (let i = 0; i < 4; i += 1) spawnGuest('4,2');
   selectedRideId = null;
+  selectedParkEntrance = false;
   refreshStats();
 };
 
 const selectRideAt = (coord: GridCoord) => {
   const rideId = rideIdAt(keyOf(coord.x, coord.z));
   selectedRideId = rideId;
+  selectedParkEntrance = false;
+  updateParkEntrancePanel();
   updateSelectedRidePanel();
   updateDebugStatus();
 
@@ -3326,6 +3689,17 @@ const selectRideAt = (coord: GridCoord) => {
 
   setStatus(t('status.selectionCleared'));
   return false;
+};
+
+const selectParkEntrance = () => {
+  if (!parkEntrance) return false;
+  selectedRideId = null;
+  selectedParkEntrance = true;
+  updateSelectedRidePanel();
+  updateParkEntrancePanel();
+  updateDebugStatus();
+  setStatus(t('status.parkEntranceSelected'));
+  return true;
 };
 
 const selectGuest = (guest: Guest) => {
@@ -3346,6 +3720,13 @@ const guestAtPointer = (event: PointerEvent) => {
   const hit = raycaster.intersectObjects(guestGroup.children, true)[0];
   const guestId = hit?.object.userData.guestId as number | undefined;
   return guestId === undefined ? undefined : guests.find((guest) => guest.id === guestId);
+};
+
+const parkEntranceAtPointer = (event: PointerEvent) => {
+  if (!parkEntrance) return false;
+  updatePointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.intersectObject(parkEntrance.group, true).length > 0;
 };
 
 const handlePointerMove = (event: PointerEvent) => {
@@ -3408,9 +3789,23 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
+  if (activeTool !== 'bulldoze' && parkEntranceAtPointer(event)) {
+    if (activeTool !== 'select') setTool('select');
+    selectParkEntrance();
+    updatePreview();
+    return;
+  }
+
   if (!hoveredTile) return;
 
   const hoverKey = keyOf(hoveredTile.x, hoveredTile.z);
+  if (activeTool !== 'bulldoze' && canSelectParkEntranceAt(hoveredTile)) {
+    if (activeTool !== 'select') setTool('select');
+    selectParkEntrance();
+    updatePreview();
+    return;
+  }
+
   const clickedRideId = rideIdAt(hoverKey);
   if (activeTool !== 'bulldoze' && clickedRideId) {
     if (activeTool !== 'select') setTool('select');
@@ -3511,10 +3906,24 @@ const setSelectedRideMusicPreset = (preset: CarouselMusicPreset) => {
   setStatus(t('status.musicPreset', { ride: rideLabel(ride), preset: musicPresetLabel(preset) }));
 };
 
+const setParkEntranceOpen = (isOpen: boolean) => {
+  if (!parkEntrance) return;
+  parkEntrance.isOpen = isOpen;
+  if (!isOpen) {
+    guests.forEach((guest) => {
+      if (guest.state !== 'boarding' && guest.state !== 'riding') sendGuestLeavingPark(guest);
+    });
+  }
+  updateParkEntrancePanel();
+  setStatus(t(isOpen ? 'status.parkOpened' : 'status.parkClosed'));
+};
+
 rideOpenButton.addEventListener('click', () => setSelectedRideOpen(true));
 rideCloseButton.addEventListener('click', () => setSelectedRideOpen(false));
 rideMusicOnButton.addEventListener('click', () => setSelectedRideMusic(true));
 rideMusicOffButton.addEventListener('click', () => setSelectedRideMusic(false));
+parkEntranceOpenButton.addEventListener('click', () => setParkEntranceOpen(true));
+parkEntranceCloseButton.addEventListener('click', () => setParkEntranceOpen(false));
 rideMusicPresetSelect.addEventListener('change', () => {
   const preset = rideMusicPresetSelect.value as CarouselMusicPreset;
   if (!carouselMusicPresets[preset]) return;
@@ -3539,6 +3948,7 @@ languageSelect.addEventListener('change', () => {
   language = languageSelect.value === 'en' ? 'en' : 'ko';
   applyStaticTranslations();
   updateSelectedRidePanel();
+  updateParkEntrancePanel();
   updateSelectedGuestWindow();
   updateDebugStatus();
   setStatus(t('status.language'));
@@ -3756,6 +4166,7 @@ const animate = () => {
   if (!isPaused) {
     updateRideSystems(simulationDelta);
     updateGateAnimations(simulationDelta);
+    updateParkGuestSpawning(simulationDelta);
     updateGuests(simulationDelta);
   }
 

@@ -88,6 +88,10 @@ button {
   display: none;
 }
 
+.park-entrance-panel[hidden] {
+  display: none;
+}
+
 .section-label {
   color: #53636a;
   font-size: 0.72rem;
