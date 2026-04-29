@@ -340,19 +340,37 @@ scene.add(sun);
 const hemisphereLight = new THREE.HemisphereLight(0xeaf8ff, 0x6a8a55, 1.45);
 scene.add(hemisphereLight);
 
-const starGroup = new THREE.Group();
-starGroup.visible = false;
-scene.add(starGroup);
+const createNightSkyTexture = () => {
+  const textureCanvas = document.createElement('canvas');
+  textureCanvas.width = 1024;
+  textureCanvas.height = 1024;
+  const context = textureCanvas.getContext('2d');
+  if (!context) return null;
 
-const starMaterial = new THREE.MeshBasicMaterial({ color: 0xf7fbff, transparent: true, opacity: 0.82 });
-const starGeometry = new THREE.SphereGeometry(0.045, 6, 4);
-for (let i = 0; i < 120; i += 1) {
-  const star = new THREE.Mesh(starGeometry, starMaterial);
-  const angle = Math.random() * Math.PI * 2;
-  const radius = 42 + Math.random() * 42;
-  star.position.set(Math.cos(angle) * radius, 22 + Math.random() * 26, Math.sin(angle) * radius);
-  starGroup.add(star);
-}
+  const gradient = context.createLinearGradient(0, 0, 0, textureCanvas.height);
+  gradient.addColorStop(0, '#0f172a');
+  gradient.addColorStop(0.58, '#111827');
+  gradient.addColorStop(1, '#182235');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
+
+  for (let i = 0; i < 150; i += 1) {
+    const x = Math.random() * textureCanvas.width;
+    const y = Math.random() * textureCanvas.height * 0.78;
+    const radius = 0.45 + Math.random() * 1.15;
+    const alpha = 0.28 + Math.random() * 0.48;
+    context.fillStyle = `rgba(240, 247, 255, ${alpha})`;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(textureCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+};
+
+const nightSkyTexture = createNightSkyTexture();
 
 const world = new THREE.Group();
 scene.add(world);
@@ -1812,14 +1830,13 @@ const applyTimeOfDay = () => {
   const night = timeOfDay === 'night';
   const background = night ? 0x111827 : 0xa7c9d4;
   renderer.setClearColor(background, 1);
-  scene.background = new THREE.Color(background);
+  scene.background = night && nightSkyTexture ? nightSkyTexture : new THREE.Color(background);
   scene.fog = new THREE.Fog(night ? 0x111827 : 0xa7c9d4, night ? 46 : 70, night ? 92 : 120);
   sun.intensity = night ? 0.22 : 2.5;
   sun.color.set(night ? 0x9fb7ff : 0xffffff);
   hemisphereLight.intensity = night ? 0.42 : 1.45;
   hemisphereLight.color.set(night ? 0x9fb7ff : 0xeaf8ff);
   hemisphereLight.groundColor.set(night ? 0x162033 : 0x6a8a55);
-  starGroup.visible = night;
   document.body.classList.toggle('is-night', night);
   dayButton.classList.toggle('is-active', !night);
   nightButton.classList.toggle('is-active', night);
