@@ -15,6 +15,7 @@ type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'bench' 
 type Language = 'ko' | 'en';
 type GuestIntent = 'wander' | 'ride' | 'rest' | 'leaving';
 type TreeKind = 'fir' | 'cherry';
+type GuestSitPhase = 'sittingDown' | 'seated' | 'standingUp';
 
 type QueuePath = {
   group: THREE.Group;
@@ -77,7 +78,24 @@ type Guest = {
   wanderTarget?: THREE.Vector3;
   seekTimer?: number;
   sitTimer?: number;
+  sitPhase?: GuestSitPhase;
+  sitTransitionStart?: THREE.Vector3;
+  sitTransitionEnd?: THREE.Vector3;
+  sitTransitionProgress?: number;
+  sitTransitionDuration?: number;
+  sitTransitionStartRotation?: number;
+  sitTransitionEndRotation?: number;
+  sitAfterStand?: 'wander' | 'leaving';
   rideTime: number;
+};
+
+type GuestMeshParts = {
+  body: THREE.Mesh;
+  head: THREE.Mesh;
+  leftArm: THREE.Mesh;
+  rightArm: THREE.Mesh;
+  leftLeg: THREE.Mesh;
+  rightLeg: THREE.Mesh;
 };
 
 type RidePhase = 'idle' | 'loading' | 'running' | 'unloading';
@@ -512,6 +530,15 @@ const heightAt = (x: number, z: number) => {
 const worldPos = (x: number, z: number, lift = 0) => new THREE.Vector3(x * tileSize, heightAt(x, z) + lift, z * tileSize);
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
+const smoothStep = (value: number) => {
+  const amount = clamp(value, 0, 1);
+  return amount * amount * (3 - 2 * amount);
+};
+const lerpAngle = (from: number, to: number, amount: number) => {
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return from + delta * amount;
+};
 const debugLines: string[] = [];
 let language: Language = 'ko';
 
@@ -1961,11 +1988,13 @@ const benchPositionForEdge = (coord: GridCoord, edge: QueueEdge) => {
 const benchSeatPosition = (bench: BenchInstance) => {
   const position = benchPositionForEdge(bench.coord, bench.edge);
   const vector = queueDirectionVectors[bench.edge];
-  position.x -= vector.x * tileSize * 0.04;
-  position.z -= vector.z * tileSize * 0.04;
+  position.x -= vector.x * tileSize * 0.02;
+  position.z -= vector.z * tileSize * 0.02;
   position.y = 0.18;
   return position;
 };
+
+const benchStandPosition = (bench: BenchInstance) => worldPos(bench.coord.x, bench.coord.z, 0.12);
 
 const isBlockedTile = (key: string) =>
   occupied.has(key) ||
@@ -3471,10 +3500,17 @@ const startGuestSitting = (guest: Guest, benchKey: string) => {
   guest.boardingTarget = undefined;
   guest.progress = 0;
   guest.pause = 0;
+  setGuestPose(guest, 0);
   guest.sitTimer = 7 + Math.random() * 7;
+  guest.sitPhase = 'sittingDown';
+  guest.sitTransitionStart = guest.mesh.position.clone();
+  guest.sitTransitionEnd = benchSeatPosition(bench);
+  guest.sitTransitionProgress = 0;
+  guest.sitTransitionDuration = 0.95;
+  guest.sitTransitionStartRotation = guest.mesh.rotation.y;
+  guest.sitTransitionEndRotation = benchRotationForEdge(bench.edge);
+  guest.sitAfterStand = undefined;
   guest.mesh.visible = true;
-  guest.mesh.position.copy(benchSeatPosition(bench));
-  guest.mesh.rotation.y = benchRotationForEdge(bench.edge);
   setGuestThought(guest, 'guest.thoughtSitting');
   debug(t('debug.benchSit', { guest: guestLabel(guest) }));
   return true;
@@ -4009,24 +4045,83 @@ const createGuestMesh = (id: number) => {
   const group = new THREE.Group();
   group.userData.guestId = id;
   const shirtColors = [0x2d9cdb, 0xeb5757, 0x27ae60, 0xbb6bd9, 0xf2994a];
+  const shirtMaterial = new THREE.MeshStandardMaterial({ color: shirtColors[Math.floor(Math.random() * shirtColors.length)], roughness: 0.72 });
+  const skinMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.6 });
+  const pantsMaterial = new THREE.MeshStandardMaterial({ color: 0x31515c, roughness: 0.72 });
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 0.17, 0.48, 10),
-    new THREE.MeshStandardMaterial({ color: shirtColors[Math.floor(Math.random() * shirtColors.length)], roughness: 0.72 }),
+    shirtMaterial,
   );
-  body.userData.guestId = id;
   body.position.y = 0.35;
   body.castShadow = true;
   group.add(body);
 
   const head = new THREE.Mesh(
     new THREE.SphereGeometry(0.15, 12, 8),
-    new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.6 }),
+    skinMaterial,
   );
-  head.userData.guestId = id;
   head.position.y = 0.72;
   head.castShadow = true;
   group.add(head);
+
+  const createArm = (x: number) => {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.34, 8), shirtMaterial);
+    arm.position.set(x, 0.39, 0.02);
+    arm.rotation.z = x > 0 ? -0.16 : 0.16;
+    arm.castShadow = true;
+    group.add(arm);
+    return arm;
+  };
+
+  const createLeg = (x: number) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.052, 0.34, 8), pantsMaterial);
+    leg.position.set(x, 0.16, 0.03);
+    leg.castShadow = true;
+    group.add(leg);
+    return leg;
+  };
+
+  const leftArm = createArm(-0.19);
+  const rightArm = createArm(0.19);
+  const leftLeg = createLeg(-0.075);
+  const rightLeg = createLeg(0.075);
+  group.userData.parts = { body, head, leftArm, rightArm, leftLeg, rightLeg } satisfies GuestMeshParts;
+  group.traverse((child) => {
+    child.userData.guestId = id;
+  });
   return group;
+};
+
+const guestMeshParts = (guest: Guest) => guest.mesh.userData.parts as GuestMeshParts | undefined;
+
+const setGuestPose = (guest: Guest, seatedAmount: number) => {
+  const parts = guestMeshParts(guest);
+  if (!parts) return;
+
+  const amount = clamp(seatedAmount, 0, 1);
+  parts.body.position.set(0, lerp(0.35, 0.38, amount), lerp(0, -0.04, amount));
+  parts.body.rotation.x = lerp(0, -0.08, amount);
+  parts.body.scale.y = lerp(1, 0.84, amount);
+
+  parts.head.position.set(0, lerp(0.72, 0.66, amount), lerp(0, -0.03, amount));
+
+  [
+    { part: parts.leftLeg, x: -0.075 },
+    { part: parts.rightLeg, x: 0.075 },
+  ].forEach(({ part, x }) => {
+    part.position.set(x, lerp(0.16, 0.32, amount), lerp(0.03, 0.24, amount));
+    part.rotation.x = lerp(0, Math.PI / 2, amount);
+    part.rotation.z = 0;
+  });
+
+  [
+    { part: parts.leftArm, x: -0.19, standingZ: 0.16, seatedZ: 0.3 },
+    { part: parts.rightArm, x: 0.19, standingZ: -0.16, seatedZ: -0.3 },
+  ].forEach(({ part, x, standingZ, seatedZ }) => {
+    part.position.set(x, lerp(0.39, 0.36, amount), lerp(0.02, 0.14, amount));
+    part.rotation.x = lerp(0, Math.PI / 2.6, amount);
+    part.rotation.z = lerp(standingZ, seatedZ, amount);
+  });
 };
 
 const createAudioZoneLabel = (zone: AudioTestZone) => {
@@ -4148,6 +4243,14 @@ const releaseBenchForGuest = (guest: Guest) => {
   if (bench?.occupantId === guest.id) bench.occupantId = undefined;
   guest.targetBenchKey = undefined;
   guest.sitTimer = undefined;
+  guest.sitPhase = undefined;
+  guest.sitTransitionStart = undefined;
+  guest.sitTransitionEnd = undefined;
+  guest.sitTransitionProgress = undefined;
+  guest.sitTransitionDuration = undefined;
+  guest.sitTransitionStartRotation = undefined;
+  guest.sitTransitionEndRotation = undefined;
+  guest.sitAfterStand = undefined;
 };
 
 const clearGuestQueueState = (guest: Guest) => {
@@ -4164,7 +4267,41 @@ const clearGuestQueueState = (guest: Guest) => {
   guest.targetBenchKey = undefined;
   guest.boardingTarget = undefined;
   guest.sitTimer = undefined;
+  guest.sitPhase = undefined;
+  guest.sitTransitionStart = undefined;
+  guest.sitTransitionEnd = undefined;
+  guest.sitTransitionProgress = undefined;
+  guest.sitTransitionDuration = undefined;
+  guest.sitTransitionStartRotation = undefined;
+  guest.sitTransitionEndRotation = undefined;
+  guest.sitAfterStand = undefined;
   guest.rideTime = 0;
+  setGuestPose(guest, 0);
+};
+
+const startGuestStandingUp = (guest: Guest, bench: BenchInstance, afterStand: 'wander' | 'leaving' = 'wander') => {
+  guest.sitPhase = 'standingUp';
+  guest.sitAfterStand = afterStand;
+  guest.sitTransitionStart = guest.mesh.position.clone();
+  guest.sitTransitionEnd = benchStandPosition(bench);
+  guest.sitTransitionProgress = 0;
+  guest.sitTransitionDuration = 0.85;
+  guest.sitTransitionStartRotation = guest.mesh.rotation.y;
+  guest.sitTransitionEndRotation = benchRotationForEdge(bench.edge);
+};
+
+const updateGuestSitTransition = (guest: Guest, delta: number, targetSeatedAmount: number) => {
+  const start = guest.sitTransitionStart;
+  const end = guest.sitTransitionEnd;
+  if (!start || !end) return true;
+
+  const duration = guest.sitTransitionDuration ?? 0.8;
+  guest.sitTransitionProgress = clamp((guest.sitTransitionProgress ?? 0) + delta / Math.max(duration, 0.001), 0, 1);
+  const amount = smoothStep(guest.sitTransitionProgress);
+  guest.mesh.position.lerpVectors(start, end, amount);
+  guest.mesh.rotation.y = lerpAngle(guest.sitTransitionStartRotation ?? guest.mesh.rotation.y, guest.sitTransitionEndRotation ?? guest.mesh.rotation.y, amount);
+  setGuestPose(guest, targetSeatedAmount === 1 ? amount : 1 - amount);
+  return guest.sitTransitionProgress >= 1;
 };
 
 const randomWanderTargetFrom = (position: THREE.Vector3) => {
@@ -4420,33 +4557,59 @@ const updateGuests = (delta: number) => {
     }
 
     if (guest.state === 'sitting') {
-      if (parkEntrance && !parkEntrance.isOpen) {
-        sendGuestLeavingPark(guest);
-        return;
-      }
-
       const bench = guest.targetBenchKey ? benches.get(guest.targetBenchKey) : undefined;
       if (!bench || bench.occupantId !== guest.id || !paths.has(benchPathKey(bench))) {
         releaseBenchForGuest(guest);
+        setGuestPose(guest, 0);
         sendGuestSeekingPath(guest);
         return;
       }
 
+      if (guest.sitPhase === 'sittingDown') {
+        if (updateGuestSitTransition(guest, delta, 1)) {
+          guest.sitPhase = 'seated';
+          guest.mesh.position.copy(benchSeatPosition(bench));
+          guest.mesh.rotation.y = benchRotationForEdge(bench.edge);
+          setGuestPose(guest, 1);
+        }
+        return;
+      }
+
+      if (guest.sitPhase === 'standingUp') {
+        if (!updateGuestSitTransition(guest, delta, 0)) return;
+
+        const pathKey = benchPathKey(bench);
+        const afterStand = guest.sitAfterStand;
+        releaseBenchForGuest(guest);
+        setGuestPose(guest, 0);
+        guest.state = 'walking';
+        guest.intent = afterStand === 'leaving' ? 'leaving' : 'wander';
+        guest.from = pathKey;
+        guest.to = pathKey;
+        guest.progress = 0;
+        guest.pause = 0;
+        placeGuestAt(guest, pathKey);
+        if (afterStand === 'leaving') {
+          if (!sendGuestLeavingPark(guest)) chooseNextGuestDestination(guest);
+        } else {
+          chooseNextGuestDestination(guest);
+        }
+        return;
+      }
+
+      guest.sitPhase = 'seated';
       guest.mesh.position.copy(benchSeatPosition(bench));
       guest.mesh.rotation.y = benchRotationForEdge(bench.edge);
+      setGuestPose(guest, 1);
+      if (parkEntrance && !parkEntrance.isOpen) {
+        startGuestStandingUp(guest, bench, 'leaving');
+        return;
+      }
+
       guest.sitTimer = Math.max(0, (guest.sitTimer ?? 0) - delta);
       if (guest.sitTimer > 0 && guest.tiredness > 30) return;
 
-      const pathKey = benchPathKey(bench);
-      releaseBenchForGuest(guest);
-      guest.state = 'walking';
-      guest.intent = 'wander';
-      guest.from = pathKey;
-      guest.to = pathKey;
-      guest.progress = 0;
-      guest.pause = 0;
-      placeGuestAt(guest, pathKey);
-      chooseNextGuestDestination(guest);
+      startGuestStandingUp(guest, bench);
       return;
     }
 
