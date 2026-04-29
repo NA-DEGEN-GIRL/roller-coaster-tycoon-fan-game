@@ -47,6 +47,7 @@ type Guest = {
   tiredness: number;
   happiness: number;
   nausea: number;
+  rideInterest: number;
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
@@ -130,8 +131,6 @@ type ParkEntrance = {
   outsideKey: string;
   isOpen: boolean;
   statusLight: THREE.Mesh;
-  gates: THREE.Group[];
-  openAmount: number;
 };
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
@@ -1753,8 +1752,6 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
 
   const boothMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.55 });
   const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x30475e, roughness: 0.5 });
-  const metalMaterial = new THREE.MeshStandardMaterial({ color: 0xf0e6cf, roughness: 0.42, metalness: 0.12 });
-
   [-0.58, 0.58].forEach((x) => {
     const booth = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.86, 0.52), boothMaterial);
     booth.position.set(x, 0.47, 0.1);
@@ -1787,18 +1784,6 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
   statusLight.castShadow = true;
   group.add(statusLight);
 
-  const gates: THREE.Group[] = [];
-  [-0.22, 0.22].forEach((x, index) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(index === 0 ? -0.22 : 0.22, 0.58, 0.44);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.08, 0.08), metalMaterial);
-    bar.position.x = index === 0 ? 0.24 : -0.24;
-    bar.castShadow = true;
-    pivot.add(bar);
-    gates.push(pivot);
-    group.add(pivot);
-  });
-
   group.traverse((child) => {
     child.userData.parkEntrance = true;
   });
@@ -1809,8 +1794,6 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
     outsideKey,
     isOpen: true,
     statusLight,
-    gates,
-    openAmount: 1,
   } satisfies ParkEntrance;
   buildGroup.add(group);
   return entrance;
@@ -2590,6 +2573,15 @@ const randomPathKey = () => {
   return keys[Math.floor(Math.random() * keys.length)] ?? '0,0';
 };
 
+const queueEntryPathKeySet = () =>
+  new Set([...queuePaths.values()].map((queuePath) => queuePath.entryPathKey).filter((key): key is string => Boolean(key)));
+
+const randomGuestStartPathKey = () => {
+  const queueEntries = queueEntryPathKeySet();
+  const keys = [...paths.keys()].filter((key) => key !== parkEntrance?.entryPathKey && !queueEntries.has(key));
+  return keys[Math.floor(Math.random() * keys.length)] ?? randomPathKey();
+};
+
 const nearestPathKeyFromPosition = (position: THREE.Vector3) => {
   let nearestKey: string | null = null;
   let nearestDistance = Number.POSITIVE_INFINITY;
@@ -2944,6 +2936,7 @@ const rideForQueueKey = (queueKey: string) =>
 
 const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
   if (!paths.has(pathKey)) return false;
+  if (guest.rideInterest < 0.46) return false;
 
   const queueKey = adjacentKeys(parseKey(pathKey)).find((candidate) => {
     const ride = rideForQueueKey(candidate);
@@ -3007,20 +3000,8 @@ const animateGate = (gate: RideGate | undefined, isOpen: boolean, delta: number)
   gate.bar.rotation.y = -gate.openAmount * (Math.PI / 2);
 };
 
-const animateParkEntrance = (delta: number) => {
-  const entrance = parkEntrance;
-  if (!entrance) return;
-  const target = entrance.isOpen ? 1 : 0;
-  const step = delta * 4.5;
-  entrance.openAmount += clamp(target - entrance.openAmount, -step, step);
-  entrance.gates.forEach((gate, index) => {
-    gate.rotation.y = (index === 0 ? -1 : 1) * entrance.openAmount * (Math.PI / 2);
-  });
-  entrance.statusLight.material = entrance.isOpen ? openMaterial : closedMaterial;
-};
-
 const updateGateAnimations = (delta: number) => {
-  animateParkEntrance(delta);
+  if (parkEntrance) parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
   rides.forEach((ride) => {
     const entrance = ride.entranceKey ? entrances.get(ride.entranceKey) : undefined;
     const exit = ride.exitKey ? exits.get(ride.exitKey) : undefined;
@@ -3330,7 +3311,7 @@ const resumeGuestInsidePark = (guest: Guest) => {
 };
 
 const spawnGuest = (startKey?: string) => {
-  const from = startKey ?? randomPathKey();
+  const from = startKey ?? randomGuestStartPathKey();
   const to = chooseNextPath(from);
   const id = ++guestSerial;
   const mesh = createGuestMesh(id);
@@ -3348,6 +3329,7 @@ const spawnGuest = (startKey?: string) => {
     tiredness: 4 + Math.random() * 18,
     happiness: 66 + Math.random() * 26,
     nausea: Math.random() * 8,
+    rideInterest: Math.random(),
     rideTime: 0,
   };
   placeGuestAt(guest, from);
@@ -3355,17 +3337,18 @@ const spawnGuest = (startKey?: string) => {
   guests.push(guest);
 };
 
-const spawnGuestAtParkEntrance = () => {
+const spawnGuestAtParkEntrance = (initialProgress = 0) => {
   if (!parkEntrance?.isOpen || !paths.has(parkEntrance.entryPathKey)) return false;
 
   const id = ++guestSerial;
   const mesh = createGuestMesh(id);
+  const progress = clamp(initialProgress, 0, 0.92);
   const guest: Guest = {
     id,
     mesh,
     from: parkEntrance.outsideKey,
     to: parkEntrance.entryPathKey,
-    progress: 0,
+    progress,
     speed: 0.35 + Math.random() * 0.28,
     pause: 0,
     state: 'walking',
@@ -3374,9 +3357,15 @@ const spawnGuestAtParkEntrance = () => {
     tiredness: 4 + Math.random() * 18,
     happiness: 66 + Math.random() * 26,
     nausea: Math.random() * 8,
+    rideInterest: Math.random(),
     rideTime: 0,
   };
-  placeGuestAt(guest, parkEntrance.outsideKey);
+  const fromCoord = parseKey(parkEntrance.outsideKey);
+  const toCoord = parseKey(parkEntrance.entryPathKey);
+  const fromPos = worldPos(fromCoord.x, fromCoord.z, 0.12);
+  const toPos = worldPos(toCoord.x, toCoord.z, 0.12);
+  guest.mesh.position.lerpVectors(fromPos, toPos, progress);
+  guest.mesh.rotation.y = Math.atan2(toPos.x - fromPos.x, toPos.z - fromPos.z);
   guestGroup.add(mesh);
   guests.push(guest);
   refreshStats();
@@ -3683,9 +3672,28 @@ const seedPark = () => {
 
   createAudioTestZones();
 
-  for (let i = 0; i < 24; i += 1) spawnGuest();
-  for (let i = 0; i < 4; i += 1) spawnGuestAtParkEntrance();
-  for (let i = 0; i < 4; i += 1) spawnGuest('4,2');
+  const initialGuestPathKeys = [
+    '-8,2',
+    '-7,2',
+    '-6,2',
+    '-5,2',
+    '-4,2',
+    '-3,2',
+    '-2,2',
+    '-2,1',
+    '-2,0',
+    '-2,-1',
+    '1,2',
+    '2,2',
+    '5,2',
+    '6,2',
+    '7,2',
+    '7,1',
+    '7,0',
+    '7,-1',
+  ];
+  initialGuestPathKeys.forEach((key) => spawnGuest(key));
+  [0, 0.22, 0.44, 0.66].forEach((progress) => spawnGuestAtParkEntrance(progress));
   selectedRideId = null;
   selectedParkEntrance = false;
   refreshStats();
