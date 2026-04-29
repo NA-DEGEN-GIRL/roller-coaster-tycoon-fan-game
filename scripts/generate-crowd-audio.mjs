@@ -32,46 +32,74 @@ const loadLocalEnv = async () => {
 
 const speechJobs = [
   {
-    filename: 'crowd-chatter-1.mp3',
+    filename: 'crowd-walla-1.mp3',
     voice: 'nova',
-    text: '와, 저기 회전목마 봐. 줄이 조금 있지만 금방 탈 수 있겠다. 오늘 사람 많다.',
+    text: '음, 와, 아, 그래, 저기, 응, 좋아, 어, 하하, 음.',
     instructions:
-      'Distant cheerful amusement park chatter. Natural Korean speech, relaxed, not too clear, like background ambience.',
+      'Indistinct cheerful amusement park walla. Do not make clear sentences. Soft overlapping murmur feel, distant and blendable.',
   },
   {
-    filename: 'crowd-chatter-2.mp3',
+    filename: 'crowd-walla-2.mp3',
     voice: 'shimmer',
-    text: '어디부터 갈까? 저쪽 길로 가보자. 사진도 찍고, 다음에는 간식도 먹자.',
+    text: '아, 음, 저쪽, 응, 와, 좋아, 어어, 하하, 그래.',
     instructions:
-      'Soft happy crowd murmur for a theme park. Keep it casual, slightly distant, no dramatic acting.',
+      'Theme park background crowd walla. Mostly indistinct syllables, not readable dialogue, casual and distant.',
   },
   {
-    filename: 'crowd-chatter-3.mp3',
+    filename: 'crowd-walla-3.mp3',
     voice: 'echo',
-    text: '사람들 많네. 음악 들린다. 저 놀이기구 끝나면 우리도 한번 타자.',
+    text: '오, 아, 음, 저기, 와, 응, 잠깐, 그래, 하.',
     instructions:
-      'Background park guest chatter. Friendly, low-detail, slightly muffled and spacious.',
+      'Low-detail amusement park guest murmur. Make it soft, muffled, and not like a single clear spoken line.',
   },
   {
-    filename: 'crowd-chatter-4.mp3',
+    filename: 'crowd-walla-4.mp3',
     voice: 'sage',
-    text: '여기 길로 가면 입구가 나올 거야. 천천히 가자. 생각보다 분위기 좋다.',
+    text: '음, 어, 좋아, 와, 하하, 응, 아, 그래, 저기.',
     instructions:
-      'Casual crowd ambience voice, quiet and distant. Blendable loop material, not announcer-like.',
+      'Distant crowd bed texture for a park. Keep it mumbled, small, cheerful, and hard to understand.',
   },
   {
-    filename: 'crowd-laugh-1.mp3',
+    filename: 'crowd-walla-5.mp3',
+    voice: 'fable',
+    text: '아, 음, 와, 오, 응, 하하, 좋아, 어, 그래.',
+    instructions:
+      'Children and families style background walla, but one subtle voice only. Distant, soft, no clear sentence.',
+  },
+  {
+    filename: 'crowd-walla-6.mp3',
+    voice: 'onyx',
+    text: '음, 그래, 어, 오, 저기, 응, 와, 하.',
+    instructions:
+      'Low male background murmur for a busy theme park. Quiet, muffled, indistinct, no clear dialogue.',
+  },
+  {
+    filename: 'crowd-reaction-1.mp3',
     voice: 'coral',
-    text: '하하, 재밌다. 우와, 또 타고 싶어. 진짜 웃기다.',
+    text: '하하하, 와!',
     instructions:
-      'Short cheerful laughter and excited amusement park reaction. Light, friendly, not loud.',
+      'Short cheerful amusement park laugh and tiny excited reaction. Natural, quick, not loud.',
   },
   {
-    filename: 'crowd-laugh-2.mp3',
+    filename: 'crowd-reaction-2.mp3',
     voice: 'ash',
-    text: '와, 방금 봤어? 하하, 좋다. 저쪽도 가보자.',
+    text: '오, 와, 하하.',
     instructions:
-      'Small group laughter and happy reaction from a theme park crowd. Keep it subtle and distant.',
+      'Small happy crowd reaction, short and distant. Laughter plus a quick wow.',
+  },
+  {
+    filename: 'crowd-reaction-3.mp3',
+    voice: 'ballad',
+    text: '꺄, 하하하.',
+    instructions:
+      'Very short playful theme park laugh reaction. Light, quick, and not harsh.',
+  },
+  {
+    filename: 'crowd-reaction-4.mp3',
+    voice: 'verse',
+    text: '와아, 좋다!',
+    instructions:
+      'Short happy amusement park cheer. Distant, natural, quick.',
   },
 ];
 

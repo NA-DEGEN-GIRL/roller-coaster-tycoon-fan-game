@@ -60,17 +60,43 @@ type Guest = {
 };
 
 type RidePhase = 'idle' | 'loading' | 'running' | 'unloading';
-type CarouselMusicPreset = 'fairgroundOrgan' | 'waltzOrgan' | 'musicBox';
+type CarouselMusicPreset = 'fairgroundOrgan' | 'waltzOrgan' | 'musicBox' | 'militaryBandOrgan';
 
 type CarouselMusicState = {
   gain: GainNode;
   nextNoteTime: number;
   noteIndex: number;
+  audio?: HTMLAudioElement;
 };
 
 type CrowdAudioState = {
   gain: GainNode;
-  layers: HTMLAudioElement[];
+  layers: {
+    audio: HTMLAudioElement;
+    gain: GainNode;
+    minDensity: number;
+    maxVolume: number;
+    exponent: number;
+  }[];
+  effects: {
+    audio: HTMLAudioElement;
+    nextTime: number;
+    minCrowd: number;
+    stopAfter: number;
+    minDelay: number;
+    maxDelay: number;
+    stopTime?: number;
+  }[];
+};
+
+type AudioTestZone = {
+  center: GridCoord;
+  amount: number;
+  radius: number;
+  dummyGuests: number;
+  color: number;
+  labelKo: string;
+  labelEn: string;
 };
 
 type Ride = {
@@ -205,7 +231,8 @@ const raycaster = new THREE.Raycaster();
 const groundGroup = new THREE.Group();
 const buildGroup = new THREE.Group();
 const guestGroup = new THREE.Group();
-world.add(groundGroup, buildGroup, guestGroup);
+const audioTestZoneGroup = new THREE.Group();
+world.add(groundGroup, buildGroup, guestGroup, audioTestZoneGroup);
 
 const groundMaterials = [
   new THREE.MeshStandardMaterial({ color: 0x79b15f, roughness: 0.82 }),
@@ -335,6 +362,13 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const debugLines: string[] = [];
 let language: Language = 'ko';
 
+const audioTestZones: AudioTestZone[] = [
+  { center: { x: -8, z: -8 }, amount: 1.4, radius: tileSize * 3.2, dummyGuests: 4, color: 0x68c7d9, labelKo: '군중 낮음', labelEn: 'Low Crowd' },
+  { center: { x: -8, z: 8 }, amount: 3.2, radius: tileSize * 3.2, dummyGuests: 9, color: 0xf2c94c, labelKo: '군중 중간', labelEn: 'Mid Crowd' },
+  { center: { x: 0, z: 8 }, amount: 6.5, radius: tileSize * 3.6, dummyGuests: 18, color: 0xeb5757, labelKo: '군중 높음', labelEn: 'High Crowd' },
+  { center: { x: 8, z: 8 }, amount: 4.8, radius: tileSize * 3.4, dummyGuests: 12, color: 0xbb6bd9, labelKo: '리액션 테스트', labelEn: 'Reaction Test' },
+];
+
 const translations: Record<Language, Record<string, string>> = {
   ko: {
     'aria.parkTools': '놀이공원 도구',
@@ -395,6 +429,7 @@ const translations: Record<Language, Record<string, string>> = {
     'music.fairgroundOrgan': '페어그라운드 오르간',
     'music.waltzOrgan': '왈츠 오르간',
     'music.musicBox': '오르골',
+    'music.militaryBandOrgan': '밀리터리 밴드 오르간',
     'stats.guests': '손님',
     'stats.paths': '길',
     'stats.queues': '대기줄',
@@ -535,6 +570,7 @@ const translations: Record<Language, Record<string, string>> = {
     'music.fairgroundOrgan': 'Fairground Organ',
     'music.waltzOrgan': 'Waltz Organ',
     'music.musicBox': 'Music Box',
+    'music.militaryBandOrgan': 'Military Band Organ',
     'stats.guests': 'Guests',
     'stats.paths': 'Paths',
     'stats.queues': 'Queues',
@@ -641,11 +677,12 @@ const carouselMusicPresets: Record<
   CarouselMusicPreset,
   {
     gain: number;
-    melody: Array<{ midi: number; duration: number }>;
-    voice: OscillatorType;
-    reed: OscillatorType;
-    bassEvery: number;
-    bassOffset: number;
+    audioSrc?: string;
+    melody?: Array<{ midi: number; duration: number }>;
+    voice?: OscillatorType;
+    reed?: OscillatorType;
+    bassEvery?: number;
+    bassOffset?: number;
   }
 > = {
   fairgroundOrgan: {
@@ -711,6 +748,10 @@ const carouselMusicPresets: Record<
       { midi: 84, duration: 0.48 },
     ],
   },
+  militaryBandOrgan: {
+    gain: 0.83,
+    audioSrc: '/audio/carousel/military-band-organ-game-mix.ogg',
+  },
 };
 const carouselNearDistance = tileSize * 2.5;
 const carouselFarDistance = tileSize * 12;
@@ -747,7 +788,7 @@ const createCarouselMusic = () => {
   const gain = context.createGain();
   gain.gain.value = 0;
   gain.connect(masterMusicGain);
-  const melody = carouselMusicPresets.fairgroundOrgan.melody;
+  const melody = carouselMusicPresets.fairgroundOrgan.melody ?? [];
   return {
     gain,
     nextNoteTime: context.currentTime + 0.05,
@@ -784,6 +825,8 @@ const scheduleCarouselNote = (ride: Ride, time: number, noteIndex: number, midi:
   if (!audioContext || !ride.music) return;
 
   const preset = carouselMusicPresets[ride.musicPreset];
+  if (preset.audioSrc || !preset.voice || !preset.reed || !preset.bassEvery || preset.bassOffset === undefined) return;
+
   const frequency = midiToFrequency(midi);
   scheduleOscillator(audioContext, ride.music.gain, preset.voice, frequency, time, duration, 0.46, -4);
   scheduleOscillator(audioContext, ride.music.gain, preset.reed, frequency * 2, time, duration * 0.82, 0.16, 5);
@@ -806,8 +849,34 @@ const rideMusicVolume = (ride: Ride) => {
 
 const stopRideMusic = (ride: Ride) => {
   if (!ride.music) return;
+  ride.music.audio?.pause();
   ride.music.gain.disconnect();
   ride.music = undefined;
+};
+
+const syncCarouselAudioPreset = (ride: Ride) => {
+  if (!audioContext || !ride.music) return;
+
+  const preset = carouselMusicPresets[ride.musicPreset];
+  if (!preset.audioSrc) {
+    if (ride.music.audio) {
+      ride.music.audio.pause();
+      ride.music.audio = undefined;
+    }
+    return;
+  }
+
+  if (ride.music.audio?.src.endsWith(preset.audioSrc)) return;
+
+  ride.music.audio?.pause();
+  const audio = new Audio(preset.audioSrc);
+  audio.loop = true;
+  audio.preload = 'auto';
+  audio.volume = 1;
+  audio.playbackRate = 0.94;
+  const source = audioContext.createMediaElementSource(audio);
+  source.connect(ride.music.gain);
+  ride.music.audio = audio;
 };
 
 const updateRideAudio = (delta: number) => {
@@ -822,8 +891,20 @@ const updateRideAudio = (delta: number) => {
     if (!ride.music) ride.music = createCarouselMusic();
     if (!ride.music) return;
 
+    syncCarouselAudioPreset(ride);
+
     const targetGain = ride.isOpen && ride.musicEnabled && !isPaused ? rideMusicVolume(ride) : 0;
     ride.music.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.18);
+    if (ride.music.audio) {
+      if (targetGain > 0.001 && ride.music.audio.paused) {
+        void ride.music.audio.play().catch(() => undefined);
+      }
+      if (targetGain <= 0.001 && !ride.music.audio.paused) {
+        ride.music.audio.pause();
+      }
+      return;
+    }
+
     if (targetGain <= 0.001) {
       ride.music.nextNoteTime = Math.max(ride.music.nextNoteTime, context.currentTime + 0.05);
       return;
@@ -834,8 +915,9 @@ const updateRideAudio = (delta: number) => {
     }
 
     const preset = carouselMusicPresets[ride.musicPreset];
-    while (ride.music.nextNoteTime < context.currentTime + Math.max(0.12, delta * 2)) {
-      const note = preset.melody[ride.music.noteIndex % preset.melody.length];
+    const melody = preset.melody ?? [];
+    while (melody.length > 0 && ride.music.nextNoteTime < context.currentTime + Math.max(0.12, delta * 2)) {
+      const note = melody[ride.music.noteIndex % melody.length];
       scheduleCarouselNote(ride, ride.music.nextNoteTime, ride.music.noteIndex, note.midi, note.duration);
       ride.music.nextNoteTime += note.duration;
       ride.music.noteIndex += 1;
@@ -852,30 +934,59 @@ const createCrowdAudio = () => {
   gain.connect(masterMusicGain);
 
   const crowdLayerSources = [
-    '/audio/crowd-ambience.ogg',
-    '/audio/crowd-laughs.ogg',
-    '/audio/generated/crowd-chatter-1.mp3',
-    '/audio/generated/crowd-chatter-2.mp3',
-    '/audio/generated/crowd-chatter-3.mp3',
-    '/audio/generated/crowd-chatter-4.mp3',
-    '/audio/generated/crowd-laugh-1.mp3',
-    '/audio/generated/crowd-laugh-2.mp3',
+    { src: '/audio/crowd/festival-crowd-walla.ogg', volume: 0.78, rate: 1, minDensity: 0.2, exponent: 0.66 },
+    { src: '/audio/candidates/high-school-cafeteria.ogg', volume: 0.22, rate: 0.985, minDensity: 1.35, exponent: 1.05 },
+    { src: '/audio/crowd/mall-less-crowded.ogg', volume: 0.22, rate: 0.97, minDensity: 0.75, exponent: 0.84 },
+    { src: '/audio/crowd/mall-alexa-bed.ogg', volume: 0.15, rate: 1.01, minDensity: 2.35, exponent: 1.28 },
   ];
 
-  const layers = crowdLayerSources.map((src, index) => {
+  const layers = crowdLayerSources.map(({ src, volume, rate, minDensity, exponent }, index) => {
     const audio = new Audio(src);
     audio.loop = true;
     audio.preload = 'auto';
-    audio.volume = src.includes('laugh') ? 0.42 : 0.72;
-    audio.playbackRate = 0.94 + (index % 5) * 0.035;
+    audio.volume = 1;
+    audio.playbackRate = rate + index * 0.006;
+    const source = context.createMediaElementSource(audio);
+    const layerGain = context.createGain();
+    layerGain.gain.value = 0;
+    source.connect(layerGain);
+    layerGain.connect(gain);
+    return {
+      audio,
+      gain: layerGain,
+      minDensity,
+      maxVolume: volume,
+      exponent,
+    };
+  });
+
+  const effects = [
+    { src: '/audio/crowd/baby-cry-2s-cc0.ogg', volume: 0.12, minCrowd: 2.2, stopAfter: 2.05, minDelay: 160, maxDelay: 350 },
+    { src: '/audio/laughter-candidates/small-group-laughter.ogg', volume: 0.18, minCrowd: 1.8, stopAfter: 2.8, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/laughter-candidates/laughter-public-domain.ogg', volume: 0.14, minCrowd: 1.6, stopAfter: 1, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/ride-effects/stealth-launch-reaction-3-9s.ogg', volume: 0.16, minCrowd: 1.2, stopAfter: 6, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/ride-effects/oblivion-happy-squeal-3-4s.ogg', volume: 0.2, minCrowd: 1.2, stopAfter: 1.15, minDelay: 10, maxDelay: 50 },
+  ].map(({ src, volume, minCrowd, stopAfter, minDelay, maxDelay }) => {
+    const audio = new Audio(src);
+    audio.loop = false;
+    audio.preload = 'auto';
+    audio.volume = volume;
     const source = context.createMediaElementSource(audio);
     source.connect(gain);
-    return audio;
+    return {
+      audio,
+      minCrowd,
+      stopAfter,
+      minDelay,
+      maxDelay,
+      nextTime: context.currentTime + minDelay + Math.random() * maxDelay,
+    };
   });
 
   return {
     gain,
     layers,
+    effects,
   } satisfies CrowdAudioState;
 };
 
@@ -896,8 +1007,19 @@ const nearbyCrowdAmount = () => {
     const fade = 1 - (distance - crowdNearDistance) / (crowdFarDistance - crowdNearDistance);
     amount += fade * fade;
   });
-  return amount + Math.min(visibleGuests * 0.08, 2.4);
+  return amount + Math.min(visibleGuests * 0.08, 2.4) + audioTestZoneCrowdAmount();
 };
+
+const audioTestZoneCrowdAmount = () =>
+  audioTestZones.reduce((amount, zone) => {
+    const zonePosition = worldPos(zone.center.x, zone.center.z);
+    const distance = Math.hypot(zonePosition.x - cameraTarget.x, zonePosition.z - cameraTarget.z);
+    if (distance >= zone.radius) return amount;
+    if (distance <= zone.radius * 0.45) return amount + zone.amount;
+
+    const fade = 1 - (distance - zone.radius * 0.45) / (zone.radius * 0.55);
+    return amount + zone.amount * fade * fade;
+  }, 0);
 
 const updateCrowdAudio = () => {
   if (!audioContext || !masterMusicGain) return;
@@ -906,15 +1028,36 @@ const updateCrowdAudio = () => {
 
   const context = audioContext;
   const crowdAmount = nearbyCrowdAmount();
-  const targetGain = isPaused ? 0 : clamp(0.035 + crowdAmount / 8, 0, 1) * 0.42 * zoomAudioFactor();
+  const density = clamp(crowdAmount / 7, 0, 1);
+  const targetGain = isPaused ? 0 : clamp(0.035 + density * 0.68, 0, 0.72) * zoomAudioFactor();
   crowdAudio.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.25);
 
   crowdAudio.layers.forEach((layer) => {
+    const layerDensity = clamp((crowdAmount - layer.minDensity) / 5.2, 0, 1);
+    const layerTarget = isPaused ? 0 : layer.maxVolume * layerDensity ** layer.exponent;
+    layer.gain.gain.setTargetAtTime(layerTarget, context.currentTime, 0.35);
+
     if (targetGain <= 0.004) return;
-    if (layer.duration > 0 && layer.currentTime === 0) {
-      layer.currentTime = Math.random() * Math.max(0, layer.duration - 0.2);
+    if (layer.audio.duration > 0 && layer.audio.currentTime === 0) {
+      layer.audio.currentTime = Math.random() * Math.max(0, layer.audio.duration - 0.2);
     }
-    if (layer.paused) void layer.play().catch(() => undefined);
+    if (layer.audio.paused) void layer.audio.play().catch(() => undefined);
+  });
+
+  crowdAudio.effects.forEach((effect) => {
+    if (effect.stopTime && context.currentTime >= effect.stopTime) {
+      effect.audio.pause();
+      effect.audio.currentTime = 0;
+      effect.stopTime = undefined;
+    }
+
+    if (targetGain <= 0.045 || crowdAmount < effect.minCrowd || context.currentTime < effect.nextTime || !effect.audio.paused) return;
+
+    effect.audio.currentTime = 0;
+    void effect.audio.play().catch(() => undefined);
+    const denseCrowdFactor = clamp(crowdAmount / 7, 0.25, 1);
+    effect.stopTime = context.currentTime + effect.stopAfter;
+    effect.nextTime = context.currentTime + effect.minDelay / denseCrowdFactor + Math.random() * effect.maxDelay;
   });
 };
 
@@ -2634,6 +2777,93 @@ const createGuestMesh = (id: number) => {
   return group;
 };
 
+const createAudioZoneLabel = (zone: AudioTestZone) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 192;
+  const context = canvas.getContext('2d');
+  if (!context) return undefined;
+
+  context.fillStyle = 'rgba(20, 24, 32, 0.78)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 8;
+  context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+  context.fillStyle = '#ffffff';
+  context.font = '700 48px sans-serif';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(language === 'ko' ? zone.labelKo : zone.labelEn, canvas.width / 2, 72);
+  context.font = '500 30px sans-serif';
+  context.fillText(`density +${zone.amount.toFixed(1)}`, canvas.width / 2, 128);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(3.8, 1.42, 1);
+  sprite.position.copy(worldPos(zone.center.x, zone.center.z, 2.1));
+  return sprite;
+};
+
+const createAudioZoneDummyGuest = (color: number) => {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.13, 0.15, 0.42, 10),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.72 }),
+  );
+  body.position.y = 0.31;
+  body.castShadow = true;
+  group.add(body);
+
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.62 }),
+  );
+  head.position.y = 0.66;
+  head.castShadow = true;
+  group.add(head);
+  return group;
+};
+
+const createAudioTestZones = () => {
+  const padGeometry = new THREE.BoxGeometry(tileSize * 3.2, 0.06, tileSize * 3.2);
+
+  audioTestZones.forEach((zone) => {
+    const zoneGroup = new THREE.Group();
+    const pad = new THREE.Mesh(
+      padGeometry,
+      new THREE.MeshStandardMaterial({
+        color: zone.color,
+        roughness: 0.62,
+        transparent: true,
+        opacity: 0.48,
+        emissive: zone.color,
+        emissiveIntensity: 0.08,
+      }),
+    );
+    pad.position.copy(worldPos(zone.center.x, zone.center.z, 0.08));
+    pad.receiveShadow = true;
+    zoneGroup.add(pad);
+
+    const label = createAudioZoneLabel(zone);
+    if (label) zoneGroup.add(label);
+
+    for (let index = 0; index < zone.dummyGuests; index += 1) {
+      const angle = (index / zone.dummyGuests) * Math.PI * 2;
+      const ring = Math.floor(index / 6);
+      const radius = tileSize * (0.42 + ring * 0.28);
+      const guest = createAudioZoneDummyGuest(zone.color);
+      guest.position.copy(worldPos(zone.center.x, zone.center.z, 0.12));
+      guest.position.x += Math.cos(angle) * radius;
+      guest.position.z += Math.sin(angle) * radius;
+      guest.rotation.y = -angle + Math.PI / 2;
+      zoneGroup.add(guest);
+    }
+
+    audioTestZoneGroup.add(zoneGroup);
+  });
+};
+
 const placeGuestAt = (guest: Guest, key: string) => {
   const { x, z } = parseKey(key);
   guest.mesh.position.copy(worldPos(x, z, 0.12));
@@ -2945,6 +3175,8 @@ const seedPark = () => {
     [6, 2],
   ].forEach(([x, z]) => addTree({ x, z }, true));
 
+  createAudioTestZones();
+
   for (let i = 0; i < 24; i += 1) spawnGuest();
   for (let i = 0; i < 4; i += 1) spawnGuest('4,2');
   selectedRideId = null;
@@ -3140,6 +3372,8 @@ const setSelectedRideMusicPreset = (preset: CarouselMusicPreset) => {
   resumeAudioContext();
   ride.musicPreset = preset;
   if (ride.music && audioContext) {
+    ride.music.audio?.pause();
+    ride.music.audio = undefined;
     ride.music.noteIndex = 0;
     ride.music.nextNoteTime = audioContext.currentTime + 0.05;
   }
