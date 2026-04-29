@@ -223,6 +223,7 @@ const guests: Guest[] = [];
 
 let activeTool: Tool = 'select';
 let hoveredTile: GridCoord | null = null;
+let previousHoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
 let isPaused = false;
 let simulationSpeed = 1;
@@ -754,6 +755,13 @@ const refreshQueueVisualAt = (key: string) => {
 
 const refreshQueueVisualsAround = (coord: GridCoord) => {
   [keyOf(coord.x, coord.z), ...adjacentKeys(coord)].forEach((key) => refreshQueueVisualAt(key));
+};
+
+const refreshQueueEntryPreviewAround = (...coords: Array<GridCoord | null>) => {
+  if (activeTool !== 'queue') return;
+  coords.forEach((coord) => {
+    if (coord) refreshQueueVisualsAround(coord);
+  });
 };
 
 const updateQueueEntryPreviews = () => {
@@ -2086,8 +2094,16 @@ const handlePointerMove = (event: PointerEvent) => {
   pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(tiles, false)[0];
-  hoveredTile = hit?.object.userData.coord ?? null;
+  const nextHoveredTile = hit?.object.userData.coord ?? null;
+  const previousHoverKey = previousHoveredTile ? keyOf(previousHoveredTile.x, previousHoveredTile.z) : null;
+  const nextHoverKey = nextHoveredTile ? keyOf(nextHoveredTile.x, nextHoveredTile.z) : null;
+  const hoverChanged = previousHoverKey !== nextHoverKey;
+  hoveredTile = nextHoveredTile;
   updatePreview();
+  if (hoverChanged) {
+    refreshQueueEntryPreviewAround(previousHoveredTile, hoveredTile);
+    previousHoveredTile = hoveredTile;
+  }
   if (isPathDragging && hoveredTile) {
     const key = keyOf(hoveredTile.x, hoveredTile.z);
     if (key !== lastDraggedBuildKey) {
@@ -2168,7 +2184,9 @@ canvas.addEventListener('pointerleave', () => {
   isMiddleDragging = false;
   isPathDragging = false;
   lastDraggedBuildKey = null;
+  refreshQueueEntryPreviewAround(hoveredTile, previousHoveredTile);
   hoveredTile = null;
+  previousHoveredTile = null;
   updatePreview();
 });
 
