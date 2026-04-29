@@ -133,6 +133,17 @@ type ParkEntrance = {
   statusLight: THREE.Mesh;
 };
 
+type TreeInstance = {
+  group: THREE.Group;
+  coord: GridCoord;
+  position: THREE.Vector3;
+};
+
+type PickedBuildObject =
+  | { type: 'ride'; rideId: string }
+  | { type: 'tree'; treeKey: string }
+  | { type: 'parkEntrance' };
+
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button');
 const statusText = document.querySelector<HTMLSpanElement>('#status-text');
@@ -168,6 +179,9 @@ const guestHappiness = document.querySelector<HTMLElement>('#guest-happiness');
 const guestNausea = document.querySelector<HTMLElement>('#guest-nausea');
 const guestFollowButton = document.querySelector<HTMLButtonElement>('#guest-follow-button');
 const guestCloseButton = document.querySelector<HTMLButtonElement>('#guest-close-button');
+const buildCatalog = document.querySelector<HTMLElement>('.build-catalog');
+const buildCategoryButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-build-category]'));
+const buildPopovers = Array.from(document.querySelectorAll<HTMLElement>('[data-build-popover]'));
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const rideToolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-ride-tool]'));
 const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-speed]'));
@@ -207,7 +221,8 @@ if (
   !guestHappiness ||
   !guestNausea ||
   !guestFollowButton ||
-  !guestCloseButton
+  !guestCloseButton ||
+  !buildCatalog
 ) {
   throw new Error('Required UI elements were not found.');
 }
@@ -336,11 +351,13 @@ const queueArrowGeometry = new THREE.ShapeGeometry(queueArrowShape);
 const queueTileCapacity = 4;
 const queueSlotIndexes = Array.from({ length: queueTileCapacity }, (_, index) => index);
 const carouselSeatCount = 8;
+const treeCollisionRadius = 0.72;
+const maxTreesPerTile = 4;
 
 const tiles: THREE.Mesh[] = [];
 const paths = new Map<string, THREE.Mesh>();
 const queuePaths = new Map<string, QueuePath>();
-const trees = new Map<string, THREE.Group>();
+const trees = new Map<string, TreeInstance>();
 const rides = new Map<string, Ride>();
 const occupied = new Map<string, string>();
 const entrances = new Map<string, RideGate>();
@@ -351,6 +368,7 @@ let parkEntrance: ParkEntrance | null = null;
 let activeTool: Tool = 'select';
 let hoveredTile: GridCoord | null = null;
 let previousHoveredTile: GridCoord | null = null;
+let hoveredWorldPoint: THREE.Vector3 | null = null;
 let selectedRideId: string | null = null;
 let selectedParkEntrance = false;
 let selectedGuestId: number | null = null;
@@ -358,6 +376,7 @@ let isPaused = false;
 let simulationSpeed = 1;
 let rideSerial = 0;
 let guestSerial = 0;
+let treeSerial = 0;
 const quarterYawStep = Math.PI / 2;
 const baseCameraYaw = Math.PI / 4;
 let cameraYaw = baseCameraYaw;
@@ -436,6 +455,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.park': '공원',
     'toolGroup.basic': '기본 도구',
     'toolGroup.paths': '길',
+    'toolGroup.rides': '놀이기구',
     'toolGroup.gentleRides': '잔잔한 놀이기구',
     'toolGroup.scenery': '꾸미기',
     'tool.select': '선택',
@@ -595,6 +615,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.park': 'Park',
     'toolGroup.basic': 'Basic Tools',
     'toolGroup.paths': 'Paths',
+    'toolGroup.rides': 'Rides',
     'toolGroup.gentleRides': 'Gentle Rides',
     'toolGroup.scenery': 'Scenery',
     'tool.select': 'Select',
@@ -1447,6 +1468,27 @@ const setSimulationSpeed = (speed: number) => {
   updateDebugStatus();
 };
 
+const closeBuildPopovers = () => {
+  buildPopovers.forEach((popover) => {
+    popover.hidden = true;
+  });
+  buildCategoryButtons.forEach((button) => {
+    button.classList.remove('is-active');
+  });
+};
+
+const toggleBuildPopover = (category: string) => {
+  const nextPopover = buildPopovers.find((popover) => popover.dataset.buildPopover === category);
+  const shouldOpen = Boolean(nextPopover?.hidden);
+  closeBuildPopovers();
+  if (!nextPopover || !shouldOpen) return;
+
+  nextPopover.hidden = false;
+  buildCategoryButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.buildCategory === category);
+  });
+};
+
 const setTool = (tool: Tool) => {
   activeTool = tool;
   if (tool !== 'queue') lastQueueBuildKey = null;
@@ -1463,8 +1505,21 @@ const setTool = (tool: Tool) => {
 toolButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setTool(button.dataset.tool as Tool);
+    closeBuildPopovers();
     button.blur();
   });
+});
+
+buildCategoryButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    toggleBuildPopover(button.dataset.buildCategory ?? '');
+    button.blur();
+  });
+});
+
+window.addEventListener('click', (event) => {
+  if (buildCatalog.contains(event.target as Node | null)) return;
+  closeBuildPopovers();
 });
 
 rideToolButtons.forEach((button) => {
@@ -1553,11 +1608,15 @@ const canSelectParkEntranceAt = (coord: GridCoord) => {
   return key === parkEntrance.outsideKey || key === parkEntrance.entryPathKey;
 };
 
+const treesInTile = (key: string) => [...trees.values()].filter((tree) => keyOf(tree.coord.x, tree.coord.z) === key);
+
+const hasTreeInTile = (key: string) => treesInTile(key).length > 0;
+
 const isBlockedTile = (key: string) =>
   occupied.has(key) ||
   paths.has(key) ||
   queuePaths.has(key) ||
-  trees.has(key) ||
+  hasTreeInTile(key) ||
   entrances.has(key) ||
   exits.has(key) ||
   key === parkEntrance?.outsideKey;
@@ -1568,7 +1627,32 @@ const canPlaceQueue = ({ x, z }: GridCoord) => inBounds(x, z) && !isBlockedTile(
 
 const canPlaceTree = ({ x, z }: GridCoord) => {
   const key = keyOf(x, z);
-  return inBounds(x, z) && !isBlockedTile(key);
+  return (
+    inBounds(x, z) &&
+    !occupied.has(key) &&
+    !paths.has(key) &&
+    !queuePaths.has(key) &&
+    !entrances.has(key) &&
+    !exits.has(key) &&
+    key !== parkEntrance?.outsideKey &&
+    treesInTile(key).length < maxTreesPerTile
+  );
+};
+
+const treePlacementPosition = (coord: GridCoord) => {
+  const center = worldPos(coord.x, coord.z, 0);
+  const margin = tileSize * 0.34;
+  const point = hoveredWorldPoint ?? center;
+  return new THREE.Vector3(
+    clamp(point.x, center.x - margin, center.x + margin),
+    heightAt(coord.x, coord.z),
+    clamp(point.z, center.z - margin, center.z + margin),
+  );
+};
+
+const canPlaceTreeAt = (coord: GridCoord, position = treePlacementPosition(coord)) => {
+  if (!canPlaceTree(coord)) return false;
+  return [...trees.values()].every((tree) => tree.position.distanceTo(position) >= treeCollisionRadius);
 };
 
 const canPlaceCarousel = (coord: GridCoord) =>
@@ -1590,13 +1674,13 @@ const canPlace = (tool: Tool, coord: GridCoord) => {
   if (tool === 'select') return canSelectRideAt(coord) || canSelectParkEntranceAt(coord);
   if (tool === 'path') return canPlacePath(coord);
   if (tool === 'queue') return canPlaceQueue(coord) || canConnectQueueEntryFromPath(keyOf(coord.x, coord.z));
-  if (tool === 'tree') return canPlaceTree(coord);
+  if (tool === 'tree') return canPlaceTreeAt(coord);
   if (tool === 'carousel') return canPlaceCarousel(coord);
   if (tool === 'entrance') return canPlaceRideGate(coord, 'entrance');
   if (tool === 'exit') return canPlaceRideGate(coord, 'exit');
 
   const key = keyOf(coord.x, coord.z);
-  return isAnyBuiltPath(key) || occupied.has(key) || trees.has(key) || entrances.has(key) || exits.has(key);
+  return isAnyBuiltPath(key) || occupied.has(key) || hasTreeInTile(key) || entrances.has(key) || exits.has(key);
 };
 
 const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
@@ -1605,7 +1689,7 @@ const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
   if (queuePaths.has(key)) return 'queue';
   if (entrances.has(key)) return 'entrance';
   if (exits.has(key)) return 'exit';
-  if (trees.has(key)) return 'tree';
+  if (hasTreeInTile(key)) return 'tree';
   if (occupied.has(key)) return 'ride';
   return null;
 };
@@ -1681,6 +1765,14 @@ const updatePreview = () => {
   selection.visible = true;
   selection.material = valid || activeTool === 'bulldoze' ? selectionMaterial : blockedMaterial;
   selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
+
+  if (activeTool === 'tree') {
+    const position = treePlacementPosition(hoveredTile);
+    selection.visible = true;
+    selection.material = canPlaceTreeAt(hoveredTile, position) ? selectionMaterial : blockedMaterial;
+    selection.position.set(position.x, heightAt(hoveredTile.x, hoveredTile.z) + 0.11, position.z);
+    return;
+  }
 
   if (activeTool === 'carousel') {
     const preview = createCarouselPlacementPreview(valid);
@@ -2130,6 +2222,9 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
   const direction = directionToRide(coord, ride);
   gate.mesh.position.copy(worldPos(coord.x, coord.z, 0.04));
   gate.mesh.rotation.y = rotationYForDirection(direction);
+  gate.mesh.traverse((child) => {
+    child.userData.rideId = ride.id;
+  });
   buildGroup.add(gate.mesh);
 
   if (kind === 'entrance') {
@@ -2154,7 +2249,7 @@ const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false
   return true;
 };
 
-const createTree = (coord: GridCoord) => {
+const createTree = (position: THREE.Vector3) => {
   const group = new THREE.Group();
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.14, 0.18, 0.9, 8),
@@ -2172,19 +2267,40 @@ const createTree = (coord: GridCoord) => {
   canopy.castShadow = true;
   group.add(canopy);
 
-  group.position.copy(worldPos(coord.x, coord.z));
+  group.position.copy(position);
   return group;
 };
 
 const addTree = (coord: GridCoord, silent = false) => {
-  if (!canPlaceTree(coord)) return false;
+  const position = treePlacementPosition(coord);
+  if (!canPlaceTreeAt(coord, position)) return false;
 
   const key = keyOf(coord.x, coord.z);
-  const tree = createTree(coord);
+  const treeId = `tree-${++treeSerial}`;
+  const tree = createTree(position);
+  tree.traverse((child) => {
+    child.userData.treeKey = treeId;
+  });
   buildGroup.add(tree);
-  trees.set(key, tree);
+  trees.set(treeId, { group: tree, coord, position: position.clone() });
   if (!silent) setStatus(t('status.treePlanted', { key }));
   return true;
+};
+
+const nearestTreeInTile = (coord: GridCoord) => {
+  const key = keyOf(coord.x, coord.z);
+  const point = hoveredWorldPoint ?? worldPos(coord.x, coord.z);
+  return treesInTile(key).sort((a, b) => a.position.distanceTo(point) - b.position.distanceTo(point))[0];
+};
+
+const removeTree = (treeKey: string) => {
+  const tree = trees.get(treeKey);
+  if (!tree) return null;
+
+  buildGroup.remove(tree.group);
+  trees.delete(treeKey);
+  setStatus(t('status.treeRemoved', { key: keyOf(tree.coord.x, tree.coord.z) }));
+  return 'tree' as const;
 };
 
 const createCarouselRiderVisual = (seatIndex: number) => {
@@ -2420,6 +2536,9 @@ const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementR
   const { group, rotor, statusLight, riderVisuals } = createCarousel();
   group.position.copy(worldPos(coord.x, coord.z, 0.03));
   group.rotation.y = placementRotationY(rotationStep);
+  group.traverse((child) => {
+    child.userData.rideId = id;
+  });
   buildGroup.add(group);
 
   const footprint = footprintFor('carousel', coord).map(({ x, z }) => keyOf(x, z));
@@ -2450,6 +2569,34 @@ const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementR
   }
   refreshStats();
   return true;
+};
+
+const removeRideById = (rideId: string) => {
+  const ride = rides.get(rideId);
+  if (!ride) return null;
+
+  stopRideMusic(ride);
+  buildGroup.remove(ride.group);
+  if (ride.entranceKey) {
+    const entrance = entrances.get(ride.entranceKey);
+    if (entrance) buildGroup.remove(entrance.mesh);
+    queuePaths.forEach((queuePath) => {
+      if (queuePath.nextKey === ride.entranceKey) queuePath.nextKey = undefined;
+    });
+    entrances.delete(ride.entranceKey);
+  }
+  if (ride.exitKey) {
+    const exit = exits.get(ride.exitKey);
+    if (exit) buildGroup.remove(exit.mesh);
+    exits.delete(ride.exitKey);
+  }
+  ride.footprint.forEach((cellKey) => occupied.delete(cellKey));
+  rides.delete(rideId);
+  if (selectedRideId === rideId) selectedRideId = null;
+  refreshStats();
+  updateSelectedRidePanel();
+  setStatus(t('status.rideRemoved'));
+  return 'ride' as const;
 };
 
 const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
@@ -2516,40 +2663,12 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     return 'exit';
   }
 
-  const tree = trees.get(key);
-  if (tree) {
-    buildGroup.remove(tree);
-    trees.delete(key);
-    setStatus(t('status.treeRemoved', { key }));
-    return 'tree';
-  }
+  const tree = nearestTreeInTile(coord);
+  if (tree) return removeTree(tree.group.userData.treeKey as string);
 
   const rideId = occupied.get(key);
   if (rideId) {
-    const ride = rides.get(rideId);
-    if (!ride) return null;
-    stopRideMusic(ride);
-    buildGroup.remove(ride.group);
-    if (ride.entranceKey) {
-      const entrance = entrances.get(ride.entranceKey);
-      if (entrance) buildGroup.remove(entrance.mesh);
-      queuePaths.forEach((queuePath) => {
-        if (queuePath.nextKey === ride.entranceKey) queuePath.nextKey = undefined;
-      });
-      entrances.delete(ride.entranceKey);
-    }
-    if (ride.exitKey) {
-      const exit = exits.get(ride.exitKey);
-      if (exit) buildGroup.remove(exit.mesh);
-      exits.delete(ride.exitKey);
-    }
-    ride.footprint.forEach((cellKey) => occupied.delete(cellKey));
-    rides.delete(rideId);
-    if (selectedRideId === rideId) selectedRideId = null;
-    refreshStats();
-    updateSelectedRidePanel();
-    setStatus(t('status.rideRemoved'));
-    return 'ride';
+    return removeRideById(rideId);
   }
 
   setStatus(t('status.nothingToRemove'));
@@ -3709,19 +3828,26 @@ const seedPark = () => {
 
 const selectRideAt = (coord: GridCoord) => {
   const rideId = rideIdAt(keyOf(coord.x, coord.z));
+  if (rideId) return selectRideById(rideId);
+
+  selectedRideId = null;
+  selectedParkEntrance = false;
+  updateParkEntrancePanel();
+  updateSelectedRidePanel();
+  updateDebugStatus();
+  setStatus(t('status.selectionCleared'));
+  return false;
+};
+
+const selectRideById = (rideId: string) => {
   selectedRideId = rideId;
   selectedParkEntrance = false;
   updateParkEntrancePanel();
   updateSelectedRidePanel();
   updateDebugStatus();
 
-  if (rideId) {
-    setStatus(t('status.carouselSelected'));
-    return true;
-  }
-
-  setStatus(t('status.selectionCleared'));
-  return false;
+  setStatus(t('status.carouselSelected'));
+  return true;
 };
 
 const selectParkEntrance = () => {
@@ -3762,6 +3888,28 @@ const parkEntranceAtPointer = (event: PointerEvent) => {
   return raycaster.intersectObject(parkEntrance.group, true).length > 0;
 };
 
+const buildObjectAtPointer = (event: PointerEvent): PickedBuildObject | undefined => {
+  updatePointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(buildGroup.children, true);
+
+  for (const hit of hits) {
+    let object: THREE.Object3D | null = hit.object;
+    while (object && object !== buildGroup) {
+      const treeKey = object.userData.treeKey as string | undefined;
+      if (treeKey && trees.has(treeKey)) return { type: 'tree', treeKey };
+
+      const rideId = object.userData.rideId as string | undefined;
+      if (rideId && rides.has(rideId)) return { type: 'ride', rideId };
+
+      if (object.userData.parkEntrance && parkEntrance) return { type: 'parkEntrance' };
+      object = object.parent;
+    }
+  }
+
+  return undefined;
+};
+
 const handlePointerMove = (event: PointerEvent) => {
   if (isMiddleDragging) {
     panCamera(event.clientX - lastDragX, event.clientY - lastDragY);
@@ -3778,6 +3926,7 @@ const handlePointerMove = (event: PointerEvent) => {
   const nextHoverKey = nextHoveredTile ? keyOf(nextHoveredTile.x, nextHoveredTile.z) : null;
   const hoverChanged = previousHoverKey !== nextHoverKey;
   hoveredTile = nextHoveredTile;
+  hoveredWorldPoint = hit?.point.clone() ?? null;
   updatePreview();
   if (hoverChanged) {
     refreshQueueEntryPreviewAround(previousHoveredTile, hoveredTile);
@@ -3822,7 +3971,31 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
-  if (activeTool !== 'bulldoze' && parkEntranceAtPointer(event)) {
+  const clickedBuildObject = buildObjectAtPointer(event);
+  if (activeTool === 'bulldoze' && clickedBuildObject) {
+    const removedTarget =
+      clickedBuildObject.type === 'tree'
+        ? removeTree(clickedBuildObject.treeKey)
+        : clickedBuildObject.type === 'ride'
+          ? removeRideById(clickedBuildObject.rideId)
+          : null;
+    if (removedTarget) {
+      isBulldozeDragging = true;
+      bulldozeDragTarget = removedTarget;
+      canvas.setPointerCapture(event.pointerId);
+    }
+    updatePreview();
+    return;
+  }
+
+  if (activeTool !== 'bulldoze' && clickedBuildObject?.type === 'ride') {
+    if (activeTool !== 'select') setTool('select');
+    selectRideById(clickedBuildObject.rideId);
+    updatePreview();
+    return;
+  }
+
+  if (activeTool !== 'bulldoze' && clickedBuildObject?.type === 'parkEntrance') {
     if (activeTool !== 'select') setTool('select');
     selectParkEntrance();
     updatePreview();
@@ -3903,6 +4076,7 @@ canvas.addEventListener('pointerleave', () => {
   refreshQueueEntryPreviewAround(hoveredTile, previousHoveredTile);
   hoveredTile = null;
   previousHoveredTile = null;
+  hoveredWorldPoint = null;
   updatePreview();
 });
 

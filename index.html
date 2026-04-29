@@ -27,8 +27,15 @@
         <div class="panel-section">
           <span class="section-label" data-i18n="section.build">건설</span>
           <div class="build-catalog" role="group" aria-label="건설 도구" data-i18n-aria="aria.buildTools">
-            <div class="tool-category">
-              <span class="tool-category-label" data-i18n="toolGroup.basic">기본 도구</span>
+            <div class="build-category-tabs">
+              <button class="build-category-button" type="button" data-build-category="basic" data-i18n="toolGroup.basic">기본</button>
+              <button class="build-category-button" type="button" data-build-category="paths" data-i18n="toolGroup.paths">길</button>
+              <button class="build-category-button" type="button" data-build-category="rides" data-i18n="toolGroup.rides">놀이기구</button>
+              <button class="build-category-button" type="button" data-build-category="scenery" data-i18n="toolGroup.scenery">꾸미기</button>
+            </div>
+
+            <div class="build-popover" data-build-popover="basic" hidden>
+              <span class="tool-category-label" data-i18n="toolGroup.basic">기본</span>
               <div class="tool-grid">
                 <button class="tool is-active" type="button" title="선택" data-i18n-title="tool.select" data-tool="select">
                   <span class="icon select-icon"></span>
@@ -41,7 +48,7 @@
               </div>
             </div>
 
-            <div class="tool-category">
+            <div class="build-popover" data-build-popover="paths" hidden>
               <span class="tool-category-label" data-i18n="toolGroup.paths">길</span>
               <div class="tool-grid">
                 <button class="tool" type="button" title="일반 길" data-i18n-title="tool.path" data-tool="path">
@@ -55,7 +62,8 @@
               </div>
             </div>
 
-            <div class="tool-category">
+            <div class="build-popover" data-build-popover="rides" hidden>
+              <span class="tool-category-label" data-i18n="toolGroup.rides">놀이기구</span>
               <span class="tool-category-label" data-i18n="toolGroup.gentleRides">잔잔한 놀이기구</span>
               <div class="tool-grid">
                 <button class="tool" type="button" title="회전목마" data-i18n-title="tool.carousel" data-tool="carousel">
@@ -65,7 +73,7 @@
               </div>
             </div>
 
-            <div class="tool-category">
+            <div class="build-popover" data-build-popover="scenery" hidden>
               <span class="tool-category-label" data-i18n="toolGroup.scenery">꾸미기</span>
               <div class="tool-grid">
                 <button class="tool" type="button" title="전나무" data-i18n-title="tool.tree" data-tool="tree">

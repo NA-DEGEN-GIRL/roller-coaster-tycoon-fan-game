@@ -101,13 +101,52 @@ button {
 }
 
 .build-catalog {
+  position: relative;
   display: grid;
   gap: 10px;
 }
 
-.tool-category {
+.build-category-tabs {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.build-category-button {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263844;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.build-category-button:hover,
+.build-category-button.is-active {
+  border-color: #de5b42;
+  background: #fff2de;
+}
+
+.build-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  width: min(320px, calc(100vw - 36px));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgb(27 42 54 / 16%);
+  border-radius: 8px;
+  background: rgb(249 251 246 / 98%);
+  box-shadow: 0 14px 32px rgb(26 39 45 / 22%);
+}
+
+.build-popover[hidden] {
+  display: none;
 }
 
 .tool-category-label {
