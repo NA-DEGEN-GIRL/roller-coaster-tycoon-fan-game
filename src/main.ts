@@ -5015,9 +5015,8 @@ const handleBuild = (event: PointerEvent) => {
   }
 
   if (event.button !== 0) return;
-  const clickedGuest = activeTool !== 'bulldoze' ? guestAtPointer(event) : undefined;
+  const clickedGuest = activeTool === 'select' ? guestAtPointer(event) : undefined;
   if (clickedGuest) {
-    if (activeTool !== 'select') setTool('select');
     selectGuest(clickedGuest);
     updatePreview();
     return;
@@ -5042,15 +5041,13 @@ const handleBuild = (event: PointerEvent) => {
     return;
   }
 
-  if (activeTool !== 'bulldoze' && clickedBuildObject?.type === 'ride') {
-    if (activeTool !== 'select') setTool('select');
+  if (activeTool === 'select' && clickedBuildObject?.type === 'ride') {
     selectRideById(clickedBuildObject.rideId);
     updatePreview();
     return;
   }
 
-  if (activeTool !== 'bulldoze' && clickedBuildObject?.type === 'parkEntrance') {
-    if (activeTool !== 'select') setTool('select');
+  if (activeTool === 'select' && clickedBuildObject?.type === 'parkEntrance') {
     selectParkEntrance();
     updatePreview();
     return;
@@ -5059,16 +5056,14 @@ const handleBuild = (event: PointerEvent) => {
   if (!hoveredTile) return;
 
   const hoverKey = keyOf(hoveredTile.x, hoveredTile.z);
-  if (activeTool !== 'bulldoze' && canSelectParkEntranceAt(hoveredTile)) {
-    if (activeTool !== 'select') setTool('select');
+  if (activeTool === 'select' && canSelectParkEntranceAt(hoveredTile)) {
     selectParkEntrance();
     updatePreview();
     return;
   }
 
   const clickedRideId = rideIdAt(hoverKey);
-  if (activeTool !== 'bulldoze' && clickedRideId) {
-    if (activeTool !== 'select') setTool('select');
+  if (activeTool === 'select' && clickedRideId) {
     selectRideAt(hoveredTile);
     updatePreview();
     return;
