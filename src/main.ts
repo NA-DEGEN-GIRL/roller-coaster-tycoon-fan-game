@@ -548,6 +548,7 @@ let treeSerial = 0;
 const quarterYawStep = Math.PI / 2;
 const baseCameraYaw = Math.PI / 4;
 let cameraYaw = baseCameraYaw;
+let targetCameraYaw = baseCameraYaw;
 let cameraZoom = 1;
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 let isMiddleDragging = false;
@@ -5738,9 +5739,23 @@ const updateCameraAngle = () => {
   camera.lookAt(cameraTarget);
 };
 
+const updateCameraYawTransition = (delta: number) => {
+  if (continuousRotationEnabled) return;
+
+  const deltaYaw = Math.atan2(Math.sin(targetCameraYaw - cameraYaw), Math.cos(targetCameraYaw - cameraYaw));
+  if (Math.abs(deltaYaw) < 0.001) {
+    cameraYaw = targetCameraYaw;
+    return;
+  }
+
+  cameraYaw += deltaYaw * (1 - Math.exp(-delta * 4.2));
+  updateCameraAngle();
+};
+
 const snapCameraToNearestQuarter = () => {
   const nearestQuarter = Math.round((cameraYaw - baseCameraYaw) / quarterYawStep);
   cameraYaw = baseCameraYaw + nearestQuarter * quarterYawStep;
+  targetCameraYaw = cameraYaw;
   updateCameraAngle();
 };
 
@@ -5819,6 +5834,7 @@ const updateKeyboardRotation = (delta: number) => {
   if (direction === 0) return;
 
   cameraYaw += direction * 1.8 * delta;
+  targetCameraYaw = cameraYaw;
   updateCameraAngle();
 };
 
@@ -5875,8 +5891,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (event.repeat) return;
-  cameraYaw += key === 'q' ? quarterYawStep : -quarterYawStep;
-  updateCameraAngle();
+  targetCameraYaw += key === 'q' ? quarterYawStep : -quarterYawStep;
   setStatus(t('status.viewRotated', { key: key.toUpperCase() }));
 });
 
@@ -5916,6 +5931,7 @@ const animate = () => {
 
   updateKeyboardCamera(delta);
   updateKeyboardRotation(delta);
+  updateCameraYawTransition(delta);
 
   if (!isPaused) {
     updateRideSystems(simulationDelta);
