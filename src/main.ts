@@ -33,6 +33,7 @@ type RideGate = GateVisual & {
 };
 
 type Guest = {
+  id: number;
   mesh: THREE.Group;
   from: string;
   to: string;
@@ -40,6 +41,11 @@ type Guest = {
   speed: number;
   pause: number;
   state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'seeking';
+  money: number;
+  hunger: number;
+  tiredness: number;
+  happiness: number;
+  nausea: number;
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
@@ -87,6 +93,16 @@ const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-b
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
 const debugLog = document.querySelector<HTMLElement>('#debug-log');
 const debugStatus = document.querySelector<HTMLElement>('#debug-status');
+const guestWindow = document.querySelector<HTMLElement>('#guest-window');
+const guestWindowTitle = document.querySelector<HTMLElement>('#guest-window-title');
+const guestStatusText = document.querySelector<HTMLElement>('#guest-status-text');
+const guestMoney = document.querySelector<HTMLElement>('#guest-money');
+const guestHunger = document.querySelector<HTMLElement>('#guest-hunger');
+const guestTiredness = document.querySelector<HTMLElement>('#guest-tiredness');
+const guestHappiness = document.querySelector<HTMLElement>('#guest-happiness');
+const guestNausea = document.querySelector<HTMLElement>('#guest-nausea');
+const guestFollowButton = document.querySelector<HTMLButtonElement>('#guest-follow-button');
+const guestCloseButton = document.querySelector<HTMLButtonElement>('#guest-close-button');
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
 const rideToolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-ride-tool]'));
 const speedButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-speed]'));
@@ -107,7 +123,17 @@ if (
   !placeExitButton ||
   !continuousRotationToggle ||
   !debugLog ||
-  !debugStatus
+  !debugStatus ||
+  !guestWindow ||
+  !guestWindowTitle ||
+  !guestStatusText ||
+  !guestMoney ||
+  !guestHunger ||
+  !guestTiredness ||
+  !guestHappiness ||
+  !guestNausea ||
+  !guestFollowButton ||
+  !guestCloseButton
 ) {
   throw new Error('Required UI elements were not found.');
 }
@@ -191,10 +217,17 @@ const selectionMaterial = new THREE.MeshStandardMaterial({
   transparent: true,
   opacity: 0.58,
 });
+const guestSelectionMaterial = new THREE.MeshBasicMaterial({
+  color: 0xfff1a8,
+  transparent: true,
+  opacity: 0.9,
+  side: THREE.DoubleSide,
+});
 
 const tileGeometry = new THREE.BoxGeometry(tileSize, 0.28, tileSize);
 const pathGeometry = new THREE.BoxGeometry(tileSize * 1.02, 0.08, tileSize * 1.02);
 const selectionGeometry = new THREE.BoxGeometry(tileSize * 0.96, 0.1, tileSize * 0.96);
+const guestSelectionGeometry = new THREE.RingGeometry(0.24, 0.34, 28);
 const rideFoundationGeometry = new THREE.BoxGeometry(tileSize * 0.98, 0.08, tileSize * 0.98);
 const rideBoundaryLongGeometry = new THREE.BoxGeometry(tileSize * 3.02, 0.16, 0.12);
 const rideBoundaryShortGeometry = new THREE.BoxGeometry(0.12, 0.16, tileSize * 3.02);
@@ -228,9 +261,11 @@ let activeTool: Tool = 'select';
 let hoveredTile: GridCoord | null = null;
 let previousHoveredTile: GridCoord | null = null;
 let selectedRideId: string | null = null;
+let selectedGuestId: number | null = null;
 let isPaused = false;
 let simulationSpeed = 1;
 let rideSerial = 0;
+let guestSerial = 0;
 const quarterYawStep = Math.PI / 2;
 const baseCameraYaw = Math.PI / 4;
 let cameraYaw = baseCameraYaw;
@@ -245,6 +280,7 @@ let lastQueueBuildKey: string | null = null;
 let bulldozeDragTarget: BulldozeTarget | null = null;
 let lastDragX = 0;
 let lastDragY = 0;
+let followSelectedGuest = false;
 const pressedMovementKeys = new Set<string>();
 const pressedRotationKeys = new Set<string>();
 let continuousRotationEnabled = false;
@@ -285,6 +321,55 @@ const refreshStats = () => {
   pathCount.textContent = String(paths.size);
   queueCount.textContent = String(queuePaths.size);
   rideCount.textContent = String(rides.size);
+};
+
+const selectedGuest = () => (selectedGuestId === null ? undefined : guests.find((guest) => guest.id === selectedGuestId));
+
+const formatPercent = (value: number) => `${Math.round(clamp(value, 0, 100))}%`;
+
+const formatGuestStatus = (guest: Guest) => {
+  if (guest.state === 'walking') return 'Walking around the park';
+  if (guest.state === 'queueing') return 'Walking through a queue';
+  if (guest.state === 'waiting') return 'Waiting in line';
+  if (guest.state === 'boarding') return 'Boarding a ride';
+  if (guest.state === 'riding') return 'On a ride';
+  if (guest.state === 'exiting') return 'Leaving a ride';
+  return 'Looking for a path';
+};
+
+const setGuestFollow = (enabled: boolean) => {
+  followSelectedGuest = enabled && Boolean(selectedGuest());
+  guestFollowButton.classList.toggle('is-active', followSelectedGuest);
+  guestFollowButton.textContent = followSelectedGuest ? 'Following camera' : 'Follow camera';
+};
+
+const updateSelectedGuestWindow = () => {
+  const guest = selectedGuest();
+  if (!guest) {
+    selectedGuestId = null;
+    guestWindow.hidden = true;
+    guestSelection.visible = false;
+    setGuestFollow(false);
+    return;
+  }
+
+  guestWindow.hidden = false;
+  guestWindowTitle.textContent = `Guest #${guest.id}`;
+  guestStatusText.textContent = formatGuestStatus(guest);
+  guestMoney.textContent = `$${guest.money.toFixed(2)}`;
+  guestHunger.textContent = formatPercent(guest.hunger);
+  guestTiredness.textContent = formatPercent(guest.tiredness);
+  guestHappiness.textContent = formatPercent(guest.happiness);
+  guestNausea.textContent = formatPercent(guest.nausea);
+  guestFollowButton.classList.toggle('is-active', followSelectedGuest);
+  guestFollowButton.textContent = followSelectedGuest ? 'Following camera' : 'Follow camera';
+
+  if (guest.mesh.visible) {
+    guestSelection.visible = true;
+    guestSelection.position.set(guest.mesh.position.x, 0.18, guest.mesh.position.z);
+  } else {
+    guestSelection.visible = false;
+  }
 };
 
 const adjacentKeys = ({ x, z }: GridCoord) => [keyOf(x + 1, z), keyOf(x - 1, z), keyOf(x, z + 1), keyOf(x, z - 1)];
@@ -516,6 +601,11 @@ for (let x = -halfMap; x < halfMap; x += 1) {
 const selection = new THREE.Mesh(selectionGeometry, selectionMaterial);
 selection.visible = false;
 world.add(selection);
+
+const guestSelection = new THREE.Mesh(guestSelectionGeometry, guestSelectionMaterial);
+guestSelection.rotation.x = -Math.PI / 2;
+guestSelection.visible = false;
+world.add(guestSelection);
 
 const placementPreview = new THREE.Group();
 world.add(placementPreview);
@@ -1598,6 +1688,8 @@ const startBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.progress = 0;
   guest.pause = 0;
   guest.mesh.visible = true;
+  guest.money = Math.max(0, guest.money - 2.5);
+  guest.happiness = clamp(guest.happiness + 4, 0, 100);
   debug(`Carousel ${ride.id.split('-')[1]} boarding guest`);
 };
 
@@ -1831,13 +1923,15 @@ const updateRideSystems = (delta: number) => {
   });
 };
 
-const createGuestMesh = () => {
+const createGuestMesh = (id: number) => {
   const group = new THREE.Group();
+  group.userData.guestId = id;
   const shirtColors = [0x2d9cdb, 0xeb5757, 0x27ae60, 0xbb6bd9, 0xf2994a];
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 0.17, 0.48, 10),
     new THREE.MeshStandardMaterial({ color: shirtColors[Math.floor(Math.random() * shirtColors.length)], roughness: 0.72 }),
   );
+  body.userData.guestId = id;
   body.position.y = 0.35;
   body.castShadow = true;
   group.add(body);
@@ -1846,6 +1940,7 @@ const createGuestMesh = () => {
     new THREE.SphereGeometry(0.15, 12, 8),
     new THREE.MeshStandardMaterial({ color: 0xf2c6a0, roughness: 0.6 }),
   );
+  head.userData.guestId = id;
   head.position.y = 0.72;
   head.castShadow = true;
   group.add(head);
@@ -1910,8 +2005,10 @@ const sendGuestSeekingPath = (guest: Guest) => {
 const spawnGuest = (startKey?: string) => {
   const from = startKey ?? randomPathKey();
   const to = chooseNextPath(from);
-  const mesh = createGuestMesh();
+  const id = ++guestSerial;
+  const mesh = createGuestMesh(id);
   const guest: Guest = {
+    id,
     mesh,
     from,
     to,
@@ -1919,6 +2016,11 @@ const spawnGuest = (startKey?: string) => {
     speed: 0.35 + Math.random() * 0.28,
     pause: startKey ? 0 : Math.random() * 0.8,
     state: 'walking',
+    money: 32 + Math.random() * 68,
+    hunger: 8 + Math.random() * 22,
+    tiredness: 4 + Math.random() * 18,
+    happiness: 66 + Math.random() * 26,
+    nausea: Math.random() * 8,
     rideTime: 0,
   };
   placeGuestAt(guest, from);
@@ -1937,8 +2039,28 @@ const resetInvalidGuests = () => {
   });
 };
 
+const updateGuestNeeds = (guest: Guest, delta: number) => {
+  const queueStress = guest.state === 'queueing' || guest.state === 'waiting' ? 1.35 : 1;
+  const seekingStress = guest.state === 'seeking' ? 1.8 : 1;
+  guest.hunger = clamp(guest.hunger + delta * 0.32, 0, 100);
+  guest.tiredness = clamp(guest.tiredness + delta * 0.24 * queueStress * seekingStress, 0, 100);
+  guest.nausea = clamp(guest.nausea - delta * 0.5, 0, 100);
+
+  if (guest.state === 'riding') {
+    guest.happiness = clamp(guest.happiness + delta * 1.2, 0, 100);
+    guest.nausea = clamp(guest.nausea + delta * 1.6, 0, 100);
+  } else if (guest.state === 'seeking') {
+    guest.happiness = clamp(guest.happiness - delta * 1.4, 0, 100);
+  } else {
+    const comfortPenalty = Math.max(0, guest.hunger - 58) * 0.016 + Math.max(0, guest.tiredness - 64) * 0.014 + guest.nausea * 0.004;
+    guest.happiness = clamp(guest.happiness - delta * comfortPenalty, 0, 100);
+  }
+};
+
 const updateGuests = (delta: number) => {
   guests.forEach((guest) => {
+    updateGuestNeeds(guest, delta);
+
     if (guest.state === 'boarding') {
       const ride = guest.rideId ? rides.get(guest.rideId) : undefined;
       if (!ride || !guest.queueMoveStart || !guest.boardingTarget) {
@@ -2156,6 +2278,26 @@ const selectRideAt = (coord: GridCoord) => {
   return false;
 };
 
+const selectGuest = (guest: Guest) => {
+  selectedGuestId = guest.id;
+  updateSelectedGuestWindow();
+  setStatus(`Guest #${guest.id} selected`);
+};
+
+const updatePointerFromEvent = (event: PointerEvent) => {
+  const bounds = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+  pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+};
+
+const guestAtPointer = (event: PointerEvent) => {
+  updatePointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(guestGroup.children, true)[0];
+  const guestId = hit?.object.userData.guestId as number | undefined;
+  return guestId === undefined ? undefined : guests.find((guest) => guest.id === guestId);
+};
+
 const handlePointerMove = (event: PointerEvent) => {
   if (isMiddleDragging) {
     panCamera(event.clientX - lastDragX, event.clientY - lastDragY);
@@ -2164,9 +2306,7 @@ const handlePointerMove = (event: PointerEvent) => {
     return;
   }
 
-  const bounds = canvas.getBoundingClientRect();
-  pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
-  pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+  updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(tiles, false)[0];
   const nextHoveredTile = hit?.object.userData.coord ?? null;
@@ -2201,6 +2341,7 @@ const handleBuild = (event: PointerEvent) => {
   if (event.button === 1) {
     event.preventDefault();
     isMiddleDragging = true;
+    setGuestFollow(false);
     lastDragX = event.clientX;
     lastDragY = event.clientY;
     canvas.setPointerCapture(event.pointerId);
@@ -2209,6 +2350,14 @@ const handleBuild = (event: PointerEvent) => {
   }
 
   if (event.button !== 0) return;
+  const clickedGuest = activeTool !== 'bulldoze' ? guestAtPointer(event) : undefined;
+  if (clickedGuest) {
+    if (activeTool !== 'select') setTool('select');
+    selectGuest(clickedGuest);
+    updatePreview();
+    return;
+  }
+
   if (!hoveredTile) return;
 
   const hoverKey = keyOf(hoveredTile.x, hoveredTile.z);
@@ -2289,6 +2438,18 @@ const setSelectedRideOpen = (isOpen: boolean) => {
 
 rideOpenButton.addEventListener('click', () => setSelectedRideOpen(true));
 rideCloseButton.addEventListener('click', () => setSelectedRideOpen(false));
+guestFollowButton.addEventListener('click', () => {
+  const guest = selectedGuest();
+  if (!guest) return;
+  setGuestFollow(!followSelectedGuest);
+  setStatus(followSelectedGuest ? `Following Guest #${guest.id}` : `Guest #${guest.id} follow off`);
+});
+guestCloseButton.addEventListener('click', () => {
+  selectedGuestId = null;
+  setGuestFollow(false);
+  updateSelectedGuestWindow();
+  setStatus('Guest window closed');
+});
 
 continuousRotationToggle.addEventListener('change', () => {
   continuousRotationEnabled = continuousRotationToggle.checked;
@@ -2382,6 +2543,28 @@ const moveCamera = (rightAmount: number, forwardAmount: number) => {
   updateCameraAngle();
 };
 
+const selectedGuestFocusPosition = () => {
+  const guest = selectedGuest();
+  if (!guest) return null;
+  const ride = guest.state === 'riding' && guest.rideId ? rides.get(guest.rideId) : undefined;
+  if (ride) return worldPos(ride.center.x, ride.center.z, 0.12);
+  return guest.mesh.position;
+};
+
+const updateGuestFollowCamera = (delta: number) => {
+  if (!followSelectedGuest) return;
+  const focus = selectedGuestFocusPosition();
+  if (!focus) {
+    setGuestFollow(false);
+    return;
+  }
+
+  const followRate = 1 - Math.exp(-delta * 7);
+  cameraTarget.x = clamp(cameraTarget.x + (focus.x - cameraTarget.x) * followRate, -18, 18);
+  cameraTarget.z = clamp(cameraTarget.z + (focus.z - cameraTarget.z) * followRate, -18, 18);
+  updateCameraAngle();
+};
+
 const updateKeyboardCamera = (delta: number) => {
   let rightAmount = 0;
   let forwardAmount = 0;
@@ -2446,6 +2629,7 @@ window.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (!['w', 'a', 's', 'd'].includes(key)) return;
   event.preventDefault();
+  setGuestFollow(false);
   pressedMovementKeys.add(key);
 });
 
@@ -2477,7 +2661,9 @@ const animate = () => {
     updateGuests(simulationDelta);
   }
 
+  updateGuestFollowCamera(delta);
   updateQueueEntryPreviews();
+  updateSelectedGuestWindow();
   updateDebugStatus();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);

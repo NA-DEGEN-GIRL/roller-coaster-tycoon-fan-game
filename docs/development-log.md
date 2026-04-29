@@ -60,10 +60,11 @@
 - 대기줄 entry 후보 hover가 바뀔 때 주변 대기줄 visual을 즉시 갱신해 펜스 preview가 화면에 반영되도록 수정
 - 불도저도 드래그 삭제를 지원하되, 첫 클릭으로 삭제한 대상 종류만 같은 드래그에서 삭제하도록 제한
 - 길 삭제로 동선이 끊긴 손님은 즉시 다른 길로 텔레포트하지 않고, `seeking` 상태로 주변을 헤매다가 가까운 일반 길로 복귀하도록 수정
+- 손님에게 번호와 money/hunger/tiredness/happiness/nausea 상태값을 추가하고, 손님 선택 팝업과 선택 손님 카메라 follow 기능을 추가
 
 ## Local Git Policy
 
 - `main` 브랜치에서 로컬 commit으로 체크포인트를 남긴다.
-- 원격이 없으므로 `git push`는 수행하지 않는다.
+- 원격이 연결되어 있으면 안정화된 commit을 push한다.
 - 큰 기능 단위나 안정화가 끝날 때 `npm run build` 통과 후 commit한다.
 - 진행 상황은 이 파일과 Git log를 함께 본다.

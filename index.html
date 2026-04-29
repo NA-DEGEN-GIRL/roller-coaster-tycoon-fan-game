@@ -96,6 +96,23 @@
 
       <main class="viewport-wrap">
         <canvas id="scene" aria-label="Isometric 3D amusement park builder"></canvas>
+        <section id="guest-window" class="guest-window" aria-label="Selected guest" hidden>
+          <div class="guest-window-header">
+            <strong id="guest-window-title">Guest #0</strong>
+            <button id="guest-close-button" type="button" title="Close guest window">x</button>
+          </div>
+          <div class="guest-window-body">
+            <span id="guest-status-text">Walking around</span>
+            <div class="guest-metrics" aria-label="Guest status">
+              <div><span>Money</span><strong id="guest-money">$0</strong></div>
+              <div><span>Hunger</span><strong id="guest-hunger">0%</strong></div>
+              <div><span>Tiredness</span><strong id="guest-tiredness">0%</strong></div>
+              <div><span>Happiness</span><strong id="guest-happiness">0%</strong></div>
+              <div><span>Nausea</span><strong id="guest-nausea">0%</strong></div>
+            </div>
+            <button id="guest-follow-button" class="guest-follow-button" type="button">Follow camera</button>
+          </div>
+        </section>
         <div class="status-bar">
           <span id="status-text">Select tool selected</span>
           <button id="pause-button" type="button">Pause</button>
