@@ -103,6 +103,9 @@ UI 기본 언어는 한국어다. 사이드 패널의 언어 선택에서 Englis
 - 말 좌석은 rotor의 자식으로 두고 애니메이션 루프에서 회전한다.
 - 탑승한 손님 수를 기준으로 회전목마 좌석에 rider visual을 표시한다. 만석이면 모든 좌석이 차고, 일부 탑승이면 비율에 맞춰 랜덤 좌석이 켜진다.
 - 운행 상태는 `idle -> loading -> running -> unloading` 순서로 전환된다.
+- 회전목마 음악은 Web Audio API 합성음으로 만든다. 오디오 파일은 사용하지 않으며, 선택 패널의 음악 on/off와 놀이기구 open 상태를 모두 만족할 때 들린다.
+- 음악 볼륨은 `cameraTarget`과 회전목마 중심 사이의 거리로 계산한다. 가까우면 선명하고 멀어질수록 fade out한다.
+- 브라우저 autoplay 정책 때문에 첫 pointer/key 입력에서 `AudioContext`를 생성/재개한다. 일시정지 중에는 master gain을 0으로 줄인다.
 - `loading` 상태는 탑승 인원 선택과 탑승 보행 애니메이션을 함께 관리한다.
 - `running` 상태에서만 rotor가 회전한다.
 

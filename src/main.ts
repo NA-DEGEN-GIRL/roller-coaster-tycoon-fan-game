@@ -61,6 +61,12 @@ type Guest = {
 
 type RidePhase = 'idle' | 'loading' | 'running' | 'unloading';
 
+type CarouselMusicState = {
+  gain: GainNode;
+  nextNoteTime: number;
+  noteIndex: number;
+};
+
 type Ride = {
   id: string;
   group: THREE.Group;
@@ -70,6 +76,8 @@ type Ride = {
   footprint: string[];
   center: GridCoord;
   isOpen: boolean;
+  musicEnabled: boolean;
+  music?: CarouselMusicState;
   entranceKey?: string;
   exitKey?: string;
   statusLight: THREE.Mesh;
@@ -90,6 +98,8 @@ const selectedRideName = document.querySelector<HTMLElement>('#selected-ride-nam
 const selectedRideStatus = document.querySelector<HTMLElement>('#selected-ride-status');
 const rideOpenButton = document.querySelector<HTMLButtonElement>('#ride-open-button');
 const rideCloseButton = document.querySelector<HTMLButtonElement>('#ride-close-button');
+const rideMusicOnButton = document.querySelector<HTMLButtonElement>('#ride-music-on-button');
+const rideMusicOffButton = document.querySelector<HTMLButtonElement>('#ride-music-off-button');
 const placeEntranceButton = document.querySelector<HTMLButtonElement>('#place-entrance-button');
 const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-button');
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
@@ -123,6 +133,8 @@ if (
   !selectedRideStatus ||
   !rideOpenButton ||
   !rideCloseButton ||
+  !rideMusicOnButton ||
+  !rideMusicOffButton ||
   !placeEntranceButton ||
   !placeExitButton ||
   !continuousRotationToggle ||
@@ -289,6 +301,8 @@ let followSelectedGuest = false;
 const pressedMovementKeys = new Set<string>();
 const pressedRotationKeys = new Set<string>();
 let continuousRotationEnabled = false;
+let audioContext: AudioContext | null = null;
+let masterMusicGain: GainNode | null = null;
 
 const keyOf = (x: number, z: number) => `${x},${z}`;
 
@@ -317,6 +331,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.languageSelect': '언어 선택',
     'aria.buildTools': '건설 도구',
     'aria.rideState': '놀이기구 운영 상태',
+    'aria.rideMusic': '놀이기구 음악 상태',
     'aria.rideTools': '선택한 놀이기구 배치 도구',
     'aria.simulationSpeed': '시뮬레이션 속도',
     'aria.scene': '아이소메트릭 3D 놀이공원 빌더',
@@ -349,6 +364,8 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.exit': '출구 도구 선택됨',
     'ride.open': '오픈',
     'ride.closed': '닫힘',
+    'ride.musicOn': '음악 ON',
+    'ride.musicOff': '음악 OFF',
     'ride.entrance': '입구',
     'ride.exit': '출구',
     'ride.placeEntrance': '입구 설치',
@@ -418,6 +435,8 @@ const translations: Record<Language, Record<string, string>> = {
     'status.clickPathBesideQueue': '대기줄 끝 옆의 길을 클릭하세요',
     'status.rideOpened': '놀이기구 오픈',
     'status.rideClosed': '놀이기구 닫힘',
+    'status.musicOn': '{ride} 음악 켜짐',
+    'status.musicOff': '{ride} 음악 꺼짐',
     'status.followOn': '{guest} 카메라 추적 중',
     'status.followOff': '{guest} 카메라 추적 끔',
     'status.guestWindowClosed': '손님 창 닫힘',
@@ -446,6 +465,7 @@ const translations: Record<Language, Record<string, string>> = {
     'aria.languageSelect': 'Language selection',
     'aria.buildTools': 'Build tools',
     'aria.rideState': 'Ride operating state',
+    'aria.rideMusic': 'Ride music state',
     'aria.rideTools': 'Selected ride placement tools',
     'aria.simulationSpeed': 'Simulation speed',
     'aria.scene': 'Isometric 3D amusement park builder',
@@ -478,6 +498,8 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.exit': 'Exit tool selected',
     'ride.open': 'Open',
     'ride.closed': 'Closed',
+    'ride.musicOn': 'Music On',
+    'ride.musicOff': 'Music Off',
     'ride.entrance': 'Entrance',
     'ride.exit': 'Exit',
     'ride.placeEntrance': 'Place entrance',
@@ -547,6 +569,8 @@ const translations: Record<Language, Record<string, string>> = {
     'status.clickPathBesideQueue': 'Click a path beside the queue tail',
     'status.rideOpened': 'Ride opened',
     'status.rideClosed': 'Ride closed',
+    'status.musicOn': '{ride} music on',
+    'status.musicOff': '{ride} music off',
     'status.followOn': 'Following {guest}',
     'status.followOff': '{guest} follow off',
     'status.guestWindowClosed': 'Guest window closed',
@@ -588,6 +612,135 @@ const rideLabel = (rideOrId: Ride | string) => {
 const guestLabel = (guest: Guest) => `${t('guest.label')} #${guest.id}`;
 
 const phaseLabel = (phase: RidePhase) => t(`phase.${phase}`);
+
+const carouselMelody = [
+  { midi: 72, duration: 0.24 },
+  { midi: 76, duration: 0.24 },
+  { midi: 79, duration: 0.24 },
+  { midi: 84, duration: 0.36 },
+  { midi: 79, duration: 0.24 },
+  { midi: 76, duration: 0.24 },
+  { midi: 74, duration: 0.24 },
+  { midi: 71, duration: 0.36 },
+  { midi: 72, duration: 0.24 },
+  { midi: 76, duration: 0.24 },
+  { midi: 81, duration: 0.24 },
+  { midi: 79, duration: 0.36 },
+  { midi: 77, duration: 0.24 },
+  { midi: 74, duration: 0.24 },
+  { midi: 72, duration: 0.48 },
+];
+const carouselNearDistance = tileSize * 2.5;
+const carouselFarDistance = tileSize * 12;
+
+const ensureAudioContext = () => {
+  if (audioContext && masterMusicGain) return audioContext;
+
+  const AudioContextConstructor =
+    window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextConstructor) return null;
+
+  audioContext = new AudioContextConstructor();
+  masterMusicGain = audioContext.createGain();
+  masterMusicGain.gain.value = 0;
+  masterMusicGain.connect(audioContext.destination);
+  return audioContext;
+};
+
+const resumeAudioContext = () => {
+  const context = ensureAudioContext();
+  if (context?.state === 'suspended') void context.resume();
+};
+
+const midiToFrequency = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+
+const createCarouselMusic = () => {
+  const context = ensureAudioContext();
+  if (!context || !masterMusicGain) return undefined;
+
+  const gain = context.createGain();
+  gain.gain.value = 0;
+  gain.connect(masterMusicGain);
+  return {
+    gain,
+    nextNoteTime: context.currentTime + 0.05,
+    noteIndex: Math.floor(Math.random() * carouselMelody.length),
+  } satisfies CarouselMusicState;
+};
+
+const scheduleCarouselNote = (ride: Ride, time: number, midi: number, duration: number) => {
+  if (!audioContext || !ride.music) return;
+
+  const oscillator = audioContext.createOscillator();
+  const chime = audioContext.createOscillator();
+  const envelope = audioContext.createGain();
+  const frequency = midiToFrequency(midi);
+
+  oscillator.type = 'triangle';
+  oscillator.frequency.setValueAtTime(frequency, time);
+  chime.type = 'sine';
+  chime.frequency.setValueAtTime(frequency * 2, time);
+
+  envelope.gain.setValueAtTime(0.0001, time);
+  envelope.gain.exponentialRampToValueAtTime(0.72, time + 0.025);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+
+  oscillator.connect(envelope);
+  chime.connect(envelope);
+  envelope.connect(ride.music.gain);
+
+  oscillator.start(time);
+  chime.start(time);
+  oscillator.stop(time + duration + 0.03);
+  chime.stop(time + duration + 0.03);
+};
+
+const rideMusicVolume = (ride: Ride) => {
+  const ridePosition = worldPos(ride.center.x, ride.center.z);
+  const distance = Math.hypot(ridePosition.x - cameraTarget.x, ridePosition.z - cameraTarget.z);
+  if (distance >= carouselFarDistance) return 0;
+  if (distance <= carouselNearDistance) return 0.28;
+  const fade = 1 - (distance - carouselNearDistance) / (carouselFarDistance - carouselNearDistance);
+  return 0.28 * fade * fade;
+};
+
+const stopRideMusic = (ride: Ride) => {
+  if (!ride.music) return;
+  ride.music.gain.disconnect();
+  ride.music = undefined;
+};
+
+const updateRideAudio = (delta: number) => {
+  if (!audioContext || !masterMusicGain) return;
+
+  const context = audioContext;
+  const masterGain = masterMusicGain;
+  const masterTarget = isPaused ? 0 : 1;
+  masterGain.gain.setTargetAtTime(masterTarget, context.currentTime, 0.08);
+
+  rides.forEach((ride) => {
+    if (!ride.music) ride.music = createCarouselMusic();
+    if (!ride.music) return;
+
+    const targetGain = ride.isOpen && ride.musicEnabled && !isPaused ? rideMusicVolume(ride) : 0;
+    ride.music.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.18);
+    if (targetGain <= 0.001) {
+      ride.music.nextNoteTime = Math.max(ride.music.nextNoteTime, context.currentTime + 0.05);
+      return;
+    }
+
+    if (ride.music.nextNoteTime < context.currentTime) {
+      ride.music.nextNoteTime = context.currentTime + 0.02;
+    }
+
+    while (ride.music.nextNoteTime < context.currentTime + Math.max(0.12, delta * 2)) {
+      const note = carouselMelody[ride.music.noteIndex % carouselMelody.length];
+      scheduleCarouselNote(ride, ride.music.nextNoteTime, note.midi, note.duration);
+      ride.music.nextNoteTime += note.duration;
+      ride.music.noteIndex += 1;
+    }
+  });
+};
 
 const applyStaticTranslations = () => {
   document.documentElement.lang = language;
@@ -785,8 +938,12 @@ const updateSelectedRidePanel = () => {
     selectedRideStatus.textContent = t('ride.prompt');
     rideOpenButton.disabled = true;
     rideCloseButton.disabled = true;
+    rideMusicOnButton.disabled = true;
+    rideMusicOffButton.disabled = true;
     rideOpenButton.classList.remove('is-active');
     rideCloseButton.classList.add('is-active');
+    rideMusicOnButton.classList.remove('is-active');
+    rideMusicOffButton.classList.add('is-active');
     updateRideToolButtons();
     return;
   }
@@ -796,8 +953,12 @@ const updateSelectedRidePanel = () => {
   selectedRideName.textContent = rideLabel(ride);
   rideOpenButton.disabled = false;
   rideCloseButton.disabled = false;
+  rideMusicOnButton.disabled = false;
+  rideMusicOffButton.disabled = false;
   rideOpenButton.classList.toggle('is-active', ride.isOpen);
   rideCloseButton.classList.toggle('is-active', !ride.isOpen);
+  rideMusicOnButton.classList.toggle('is-active', ride.musicEnabled);
+  rideMusicOffButton.classList.toggle('is-active', !ride.musicEnabled);
 
   if (!ride.isOpen) {
     selectedRideStatus.textContent = t('ride.closedStatus');
@@ -1659,6 +1820,7 @@ const addCarousel = (coord: GridCoord, silent = false) => {
     footprint,
     center: coord,
     isOpen: false,
+    musicEnabled: true,
     statusLight,
     riders: 0,
     phase: 'idle',
@@ -1751,6 +1913,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
   if (rideId) {
     const ride = rides.get(rideId);
     if (!ride) return null;
+    stopRideMusic(ride);
     buildGroup.remove(ride.group);
     if (ride.entranceKey) {
       const entrance = entrances.get(ride.entranceKey);
@@ -2745,13 +2908,27 @@ canvas.addEventListener('pointerleave', () => {
 const setSelectedRideOpen = (isOpen: boolean) => {
   const ride = selectedRide();
   if (!ride) return;
+  resumeAudioContext();
   ride.isOpen = isOpen;
   updateSelectedRidePanel();
   setStatus(ride.isOpen ? t('status.rideOpened') : t('status.rideClosed'));
 };
 
+const setSelectedRideMusic = (enabled: boolean) => {
+  const ride = selectedRide();
+  if (!ride) return;
+  resumeAudioContext();
+  ride.musicEnabled = enabled;
+  updateSelectedRidePanel();
+  setStatus(t(enabled ? 'status.musicOn' : 'status.musicOff', { ride: rideLabel(ride) }));
+};
+
 rideOpenButton.addEventListener('click', () => setSelectedRideOpen(true));
 rideCloseButton.addEventListener('click', () => setSelectedRideOpen(false));
+rideMusicOnButton.addEventListener('click', () => setSelectedRideMusic(true));
+rideMusicOffButton.addEventListener('click', () => setSelectedRideMusic(false));
+window.addEventListener('pointerdown', resumeAudioContext);
+window.addEventListener('keydown', resumeAudioContext);
 guestFollowButton.addEventListener('click', () => {
   const guest = selectedGuest();
   if (!guest) return;
@@ -2976,6 +3153,7 @@ const animate = () => {
   }
 
   updateGuestFollowCamera(delta);
+  updateRideAudio(delta);
   updateQueueEntryPreviews();
   updateSelectedGuestWindow();
   updateDebugStatus();

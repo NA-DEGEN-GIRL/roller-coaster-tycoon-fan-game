@@ -361,6 +361,12 @@ button {
   gap: 8px;
 }
 
+.ride-music-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .ride-state-button {
   min-height: 34px;
   border: 1px solid rgb(27 42 54 / 18%);
@@ -382,6 +388,18 @@ button {
   border-color: #c0392b;
   background: #ffe4df;
   color: #9c2d22;
+}
+
+.ride-state-button.music-on.is-active {
+  border-color: #5f4ea2;
+  background: #ece8ff;
+  color: #403285;
+}
+
+.ride-state-button.music-off.is-active {
+  border-color: #7a8790;
+  background: #edf0f2;
+  color: #4d5962;
 }
 
 .ride-state-button:disabled {

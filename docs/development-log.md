@@ -63,6 +63,7 @@
 - 손님에게 번호와 money/hunger/tiredness/happiness/nausea 상태값을 추가하고, 손님 선택 팝업과 선택 손님 카메라 follow 기능을 추가
 - UI 기본 언어를 한국어로 바꾸고, 한국어/영어 언어 선택 및 주요 상태 메시지 번역을 추가
 - 선택된 놀이기구가 없을 때는 놀이기구 조작 패널을 숨기도록 수정
+- 회전목마에 Web Audio API 기반 합성 음악을 추가하고, 카메라 타깃과의 거리 기반 볼륨 및 선택 패널 음악 on/off를 지원
 
 ## Local Git Policy
 
