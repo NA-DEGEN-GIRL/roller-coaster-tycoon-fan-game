@@ -70,8 +70,7 @@ type CarouselMusicState = {
 
 type CrowdAudioState = {
   gain: GainNode;
-  noise: AudioBufferSourceNode;
-  nextChatterTime: number;
+  layers: HTMLAudioElement[];
 };
 
 type Ride = {
@@ -715,8 +714,8 @@ const carouselMusicPresets: Record<
 };
 const carouselNearDistance = tileSize * 2.5;
 const carouselFarDistance = tileSize * 12;
-const crowdNearDistance = tileSize * 1.1;
-const crowdFarDistance = tileSize * 7;
+const crowdNearDistance = tileSize * 3.2;
+const crowdFarDistance = tileSize * 16;
 
 const ensureAudioContext = () => {
   if (audioContext && masterMusicGain) return audioContext;
@@ -848,48 +847,32 @@ const createCrowdAudio = () => {
   const context = ensureAudioContext();
   if (!context || !masterMusicGain) return null;
 
-  const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
-  const data = buffer.getChannelData(0);
-  let last = 0;
-  for (let i = 0; i < data.length; i += 1) {
-    last = last * 0.94 + (Math.random() * 2 - 1) * 0.06;
-    data[i] = last;
-  }
-
-  const noise = context.createBufferSource();
-  noise.buffer = buffer;
-  noise.loop = true;
-
-  const lowMurmur = context.createBiquadFilter();
-  lowMurmur.type = 'bandpass';
-  lowMurmur.frequency.value = 420;
-  lowMurmur.Q.value = 0.75;
-
-  const crowdTone = context.createBiquadFilter();
-  crowdTone.type = 'lowpass';
-  crowdTone.frequency.value = 1500;
-  crowdTone.Q.value = 0.5;
-
   const gain = context.createGain();
   gain.gain.value = 0;
-
-  noise.connect(lowMurmur);
-  lowMurmur.connect(crowdTone);
-  crowdTone.connect(gain);
   gain.connect(masterMusicGain);
-  noise.start();
+
+  const layers = ['/audio/crowd-ambience.ogg', '/audio/crowd-laughs.ogg'].map((src) => {
+    const audio = new Audio(src);
+    audio.loop = true;
+    audio.preload = 'auto';
+    audio.volume = 1;
+    const source = context.createMediaElementSource(audio);
+    source.connect(gain);
+    return audio;
+  });
 
   return {
     gain,
-    noise,
-    nextChatterTime: context.currentTime + 0.2,
+    layers,
   } satisfies CrowdAudioState;
 };
 
 const nearbyCrowdAmount = () => {
   let amount = 0;
+  let visibleGuests = 0;
   guests.forEach((guest) => {
     if (!guest.mesh.visible || guest.state === 'riding') return;
+    visibleGuests += 1;
 
     const distance = Math.hypot(guest.mesh.position.x - cameraTarget.x, guest.mesh.position.z - cameraTarget.z);
     if (distance >= crowdFarDistance) return;
@@ -901,34 +884,7 @@ const nearbyCrowdAmount = () => {
     const fade = 1 - (distance - crowdNearDistance) / (crowdFarDistance - crowdNearDistance);
     amount += fade * fade;
   });
-  return amount;
-};
-
-const scheduleCrowdChatter = (context: AudioContext, destination: AudioNode, time: number, crowdAmount: number) => {
-  const voiceCount = Math.min(3, Math.max(1, Math.floor(crowdAmount / 5)));
-  for (let i = 0; i < voiceCount; i += 1) {
-    const oscillator = context.createOscillator();
-    const formant = context.createBiquadFilter();
-    const envelope = context.createGain();
-    const duration = 0.08 + Math.random() * 0.12;
-    const start = time + Math.random() * 0.05;
-
-    oscillator.type = Math.random() > 0.55 ? 'sawtooth' : 'triangle';
-    oscillator.frequency.setValueAtTime(135 + Math.random() * 190, start);
-    oscillator.frequency.exponentialRampToValueAtTime(115 + Math.random() * 210, start + duration);
-    formant.type = 'bandpass';
-    formant.frequency.setValueAtTime(650 + Math.random() * 1500, start);
-    formant.Q.value = 1.1 + Math.random() * 1.4;
-    envelope.gain.setValueAtTime(0.0001, start);
-    envelope.gain.exponentialRampToValueAtTime(0.035 + Math.random() * 0.025, start + 0.02);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-
-    oscillator.connect(formant);
-    formant.connect(envelope);
-    envelope.connect(destination);
-    oscillator.start(start);
-    oscillator.stop(start + duration + 0.03);
-  }
+  return amount + Math.min(visibleGuests * 0.08, 2.4);
 };
 
 const updateCrowdAudio = () => {
@@ -938,22 +894,13 @@ const updateCrowdAudio = () => {
 
   const context = audioContext;
   const crowdAmount = nearbyCrowdAmount();
-  const targetGain = isPaused ? 0 : clamp(crowdAmount / 10, 0, 1) * 0.2 * zoomAudioFactor();
+  const targetGain = isPaused ? 0 : clamp(0.035 + crowdAmount / 8, 0, 1) * 0.42 * zoomAudioFactor();
   crowdAudio.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.25);
 
-  if (targetGain <= 0.004) {
-    crowdAudio.nextChatterTime = Math.max(crowdAudio.nextChatterTime, context.currentTime + 0.12);
-    return;
-  }
-
-  if (crowdAudio.nextChatterTime < context.currentTime) {
-    crowdAudio.nextChatterTime = context.currentTime + 0.03;
-  }
-
-  while (crowdAudio.nextChatterTime < context.currentTime + 0.25) {
-    scheduleCrowdChatter(context, crowdAudio.gain, crowdAudio.nextChatterTime, crowdAmount);
-    crowdAudio.nextChatterTime += 0.08 + Math.random() * clamp(0.28 - crowdAmount * 0.012, 0.08, 0.24);
-  }
+  crowdAudio.layers.forEach((layer) => {
+    if (targetGain <= 0.004) return;
+    if (layer.paused) void layer.play().catch(() => undefined);
+  });
 };
 
 const applyStaticTranslations = () => {

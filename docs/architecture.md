@@ -112,8 +112,8 @@ UI 기본 언어는 한국어다. 사이드 패널의 언어 선택에서 Englis
 
 ## Park Ambience
 
-- 군중 ambience는 Web Audio API 합성음으로 만든다. 루프 노이즈를 필터링한 저역 웅성거림과 짧은 랜덤 말소리 조각을 섞는다.
-- 볼륨은 `cameraTarget` 주변의 보이는 손님 밀도와 `cameraZoom`을 기준으로 계산한다. 손님이 많고 확대되어 있을수록 커지고, 줌아웃하거나 손님이 멀면 작아진다.
+- 군중 ambience는 합성하지 않고 실제 오디오 루프 파일을 Web Audio로 믹싱한다. `public/audio/crowd-ambience.ogg`와 선택 레이어 `public/audio/crowd-laughs.ogg`를 사용한다.
+- 볼륨은 `cameraTarget` 주변의 보이는 손님 밀도와 `cameraZoom`을 기준으로 계산한다. 전체 손님 수에 따른 낮은 기본 ambience를 깔고, 근처 손님이 많을수록 커지며 줌아웃하거나 손님이 멀면 작아진다.
 - `loading` 상태는 탑승 인원 선택과 탑승 보행 애니메이션을 함께 관리한다.
 - `running` 상태에서만 rotor가 회전한다.
 
