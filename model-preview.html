@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guest Model Preview</title>
+    <style>
+      body {
+        margin: 0;
+        background: #d7e6ea;
+        color: #23313a;
+        font-family: system-ui, sans-serif;
+      }
+
+      #app {
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .label-row {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 24px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        pointer-events: none;
+        text-align: center;
+        font-size: 16px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="label-row">
+      <div>Standing</div>
+      <div>Walking</div>
+      <div>Sitting</div>
+    </div>
+    <script type="module" src="/src/guestModelPreview.ts"></script>
+  </body>
+</html>
