@@ -106,8 +106,14 @@ UI 기본 언어는 한국어다. 사이드 패널의 언어 선택에서 Englis
 - 회전목마 음악은 Web Audio API 합성음으로 만든다. 오디오 파일은 사용하지 않으며, 선택 패널의 음악 on/off와 놀이기구 open 상태를 모두 만족할 때 들린다.
 - 회전목마 음악은 `fairgroundOrgan`, `waltzOrgan`, `musicBox` 프리셋 중에서 놀이기구별로 선택한다. 기본값은 RCT풍에 가까운 페어그라운드 오르간이다.
 - 음악 볼륨은 `cameraTarget`과 회전목마 중심 사이의 거리로 계산한다. 가까우면 선명하고 멀어질수록 fade out한다.
+- 회전목마 음악은 줌아웃할수록 추가로 작아진다.
 - 브라우저 autoplay 정책 때문에 첫 pointer/key 입력에서 `AudioContext`를 생성/재개한다. 일시정지 중에는 master gain을 0으로 줄인다.
 - 운행 중에는 rotor가 회전하고, 각 말/탑승자 묶음은 고정된 폴을 따라 위아래로 움직인다.
+
+## Park Ambience
+
+- 군중 ambience는 Web Audio API 합성음으로 만든다. 루프 노이즈를 필터링한 저역 웅성거림과 짧은 랜덤 말소리 조각을 섞는다.
+- 볼륨은 `cameraTarget` 주변의 보이는 손님 밀도와 `cameraZoom`을 기준으로 계산한다. 손님이 많고 확대되어 있을수록 커지고, 줌아웃하거나 손님이 멀면 작아진다.
 - `loading` 상태는 탑승 인원 선택과 탑승 보행 애니메이션을 함께 관리한다.
 - `running` 상태에서만 rotor가 회전한다.
 

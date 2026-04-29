@@ -68,6 +68,12 @@ type CarouselMusicState = {
   noteIndex: number;
 };
 
+type CrowdAudioState = {
+  gain: GainNode;
+  noise: AudioBufferSourceNode;
+  nextChatterTime: number;
+};
+
 type Ride = {
   id: string;
   group: THREE.Group;
@@ -307,6 +313,7 @@ const pressedRotationKeys = new Set<string>();
 let continuousRotationEnabled = false;
 let audioContext: AudioContext | null = null;
 let masterMusicGain: GainNode | null = null;
+let crowdAudio: CrowdAudioState | null = null;
 
 const keyOf = (x: number, z: number) => `${x},${z}`;
 
@@ -708,6 +715,8 @@ const carouselMusicPresets: Record<
 };
 const carouselNearDistance = tileSize * 2.5;
 const carouselFarDistance = tileSize * 12;
+const crowdNearDistance = tileSize * 1.1;
+const crowdFarDistance = tileSize * 7;
 
 const ensureAudioContext = () => {
   if (audioContext && masterMusicGain) return audioContext;
@@ -727,6 +736,8 @@ const resumeAudioContext = () => {
   const context = ensureAudioContext();
   if (context?.state === 'suspended') void context.resume();
 };
+
+const zoomAudioFactor = () => clamp((cameraZoom - 0.55) / 1.2, 0.14, 1);
 
 const midiToFrequency = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
 
@@ -789,9 +800,9 @@ const rideMusicVolume = (ride: Ride) => {
   const distance = Math.hypot(ridePosition.x - cameraTarget.x, ridePosition.z - cameraTarget.z);
   if (distance >= carouselFarDistance) return 0;
   const presetGain = carouselMusicPresets[ride.musicPreset].gain;
-  if (distance <= carouselNearDistance) return presetGain;
+  if (distance <= carouselNearDistance) return presetGain * zoomAudioFactor();
   const fade = 1 - (distance - carouselNearDistance) / (carouselFarDistance - carouselNearDistance);
-  return presetGain * fade * fade;
+  return presetGain * fade * fade * zoomAudioFactor();
 };
 
 const stopRideMusic = (ride: Ride) => {
@@ -831,6 +842,118 @@ const updateRideAudio = (delta: number) => {
       ride.music.noteIndex += 1;
     }
   });
+};
+
+const createCrowdAudio = () => {
+  const context = ensureAudioContext();
+  if (!context || !masterMusicGain) return null;
+
+  const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    last = last * 0.94 + (Math.random() * 2 - 1) * 0.06;
+    data[i] = last;
+  }
+
+  const noise = context.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+
+  const lowMurmur = context.createBiquadFilter();
+  lowMurmur.type = 'bandpass';
+  lowMurmur.frequency.value = 420;
+  lowMurmur.Q.value = 0.75;
+
+  const crowdTone = context.createBiquadFilter();
+  crowdTone.type = 'lowpass';
+  crowdTone.frequency.value = 1500;
+  crowdTone.Q.value = 0.5;
+
+  const gain = context.createGain();
+  gain.gain.value = 0;
+
+  noise.connect(lowMurmur);
+  lowMurmur.connect(crowdTone);
+  crowdTone.connect(gain);
+  gain.connect(masterMusicGain);
+  noise.start();
+
+  return {
+    gain,
+    noise,
+    nextChatterTime: context.currentTime + 0.2,
+  } satisfies CrowdAudioState;
+};
+
+const nearbyCrowdAmount = () => {
+  let amount = 0;
+  guests.forEach((guest) => {
+    if (!guest.mesh.visible || guest.state === 'riding') return;
+
+    const distance = Math.hypot(guest.mesh.position.x - cameraTarget.x, guest.mesh.position.z - cameraTarget.z);
+    if (distance >= crowdFarDistance) return;
+    if (distance <= crowdNearDistance) {
+      amount += 1;
+      return;
+    }
+
+    const fade = 1 - (distance - crowdNearDistance) / (crowdFarDistance - crowdNearDistance);
+    amount += fade * fade;
+  });
+  return amount;
+};
+
+const scheduleCrowdChatter = (context: AudioContext, destination: AudioNode, time: number, crowdAmount: number) => {
+  const voiceCount = Math.min(3, Math.max(1, Math.floor(crowdAmount / 5)));
+  for (let i = 0; i < voiceCount; i += 1) {
+    const oscillator = context.createOscillator();
+    const formant = context.createBiquadFilter();
+    const envelope = context.createGain();
+    const duration = 0.08 + Math.random() * 0.12;
+    const start = time + Math.random() * 0.05;
+
+    oscillator.type = Math.random() > 0.55 ? 'sawtooth' : 'triangle';
+    oscillator.frequency.setValueAtTime(135 + Math.random() * 190, start);
+    oscillator.frequency.exponentialRampToValueAtTime(115 + Math.random() * 210, start + duration);
+    formant.type = 'bandpass';
+    formant.frequency.setValueAtTime(650 + Math.random() * 1500, start);
+    formant.Q.value = 1.1 + Math.random() * 1.4;
+    envelope.gain.setValueAtTime(0.0001, start);
+    envelope.gain.exponentialRampToValueAtTime(0.035 + Math.random() * 0.025, start + 0.02);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+    oscillator.connect(formant);
+    formant.connect(envelope);
+    envelope.connect(destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.03);
+  }
+};
+
+const updateCrowdAudio = () => {
+  if (!audioContext || !masterMusicGain) return;
+  if (!crowdAudio) crowdAudio = createCrowdAudio();
+  if (!crowdAudio) return;
+
+  const context = audioContext;
+  const crowdAmount = nearbyCrowdAmount();
+  const targetGain = isPaused ? 0 : clamp(crowdAmount / 10, 0, 1) * 0.2 * zoomAudioFactor();
+  crowdAudio.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.25);
+
+  if (targetGain <= 0.004) {
+    crowdAudio.nextChatterTime = Math.max(crowdAudio.nextChatterTime, context.currentTime + 0.12);
+    return;
+  }
+
+  if (crowdAudio.nextChatterTime < context.currentTime) {
+    crowdAudio.nextChatterTime = context.currentTime + 0.03;
+  }
+
+  while (crowdAudio.nextChatterTime < context.currentTime + 0.25) {
+    scheduleCrowdChatter(context, crowdAudio.gain, crowdAudio.nextChatterTime, crowdAmount);
+    crowdAudio.nextChatterTime += 0.08 + Math.random() * clamp(0.28 - crowdAmount * 0.012, 0.08, 0.24);
+  }
 };
 
 const applyStaticTranslations = () => {
@@ -3298,6 +3421,7 @@ const animate = () => {
 
   updateGuestFollowCamera(delta);
   updateRideAudio(delta);
+  updateCrowdAudio();
   updateQueueEntryPreviews();
   updateSelectedGuestWindow();
   updateDebugStatus();
