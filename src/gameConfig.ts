@@ -1,6 +1,25 @@
 export const gameConfig = {
   economy: {
     startingCash: 250000,
+    parkAdmissionFee: 10,
+    rideDefaults: {
+      carousel: {
+        ticketPrice: 2.5,
+        excitement: 44,
+        intensity: 18,
+        nauseaRating: 8,
+        popularity: 62,
+      },
+    },
+    guestDecision: {
+      admissionValue: 44,
+      minimumHappinessToStay: 18,
+      lowCashExitThreshold: 3,
+      queuePatiencePenalty: 5.2,
+      nauseaPenalty: 0.22,
+      minimumRideScore: 0,
+      rejectionCooldown: 14,
+    },
     buildCosts: {
       path: 12,
       queuePath: 18,

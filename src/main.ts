@@ -13,6 +13,7 @@ type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
 type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'ride';
 type Language = 'ko' | 'en';
+type GuestIntent = 'wander' | 'ride' | 'leaving';
 
 type QueuePath = {
   group: THREE.Group;
@@ -49,6 +50,19 @@ type Guest = {
   happiness: number;
   nausea: number;
   rideInterest: number;
+  intent: GuestIntent;
+  priceSensitivity: number;
+  patience: number;
+  ridePreference: number;
+  visitedRideIds: Set<string>;
+  rejectedRideIds: Set<string>;
+  thought: string;
+  thoughtKey?: string;
+  thoughtReplacements?: Record<string, string | number>;
+  thoughtRideId?: string;
+  targetPathKey?: string;
+  targetRideId?: string;
+  rejectionCooldown?: number;
   rideId?: string;
   queueKey?: string;
   queueSlotIndex?: number;
@@ -124,6 +138,11 @@ type Ride = {
   riders: number;
   phase: RidePhase;
   phaseTimer: number;
+  ticketPrice: number;
+  excitement: number;
+  intensity: number;
+  nauseaRating: number;
+  popularity: number;
 };
 
 type ParkEntrance = {
@@ -132,6 +151,7 @@ type ParkEntrance = {
   outsideKey: string;
   isOpen: boolean;
   statusLight: THREE.Mesh;
+  admissionFee: number;
 };
 
 type TreeInstance = {
@@ -167,6 +187,8 @@ const rideCloseButton = document.querySelector<HTMLButtonElement>('#ride-close-b
 const rideMusicOnButton = document.querySelector<HTMLButtonElement>('#ride-music-on-button');
 const rideMusicOffButton = document.querySelector<HTMLButtonElement>('#ride-music-off-button');
 const rideMusicPresetSelect = document.querySelector<HTMLSelectElement>('#ride-music-preset-select');
+const rideTicketPriceInput = document.querySelector<HTMLInputElement>('#ride-ticket-price-input');
+const rideTicketPriceValue = document.querySelector<HTMLElement>('#ride-ticket-price-value');
 const placeEntranceButton = document.querySelector<HTMLButtonElement>('#place-entrance-button');
 const placeExitButton = document.querySelector<HTMLButtonElement>('#place-exit-button');
 const continuousRotationToggle = document.querySelector<HTMLInputElement>('#continuous-rotation-toggle');
@@ -186,6 +208,11 @@ const guestCloseButton = document.querySelector<HTMLButtonElement>('#guest-close
 const buildCatalog = document.querySelector<HTMLElement>('.build-catalog');
 const treeScaleInput = document.querySelector<HTMLInputElement>('#tree-scale-input');
 const treeScaleValue = document.querySelector<HTMLElement>('#tree-scale-value');
+const parkAdmissionPriceInput = document.querySelector<HTMLInputElement>('#park-admission-price-input');
+const parkAdmissionPriceValue = document.querySelector<HTMLElement>('#park-admission-price-value');
+const economyAdmissionPriceInput = document.querySelector<HTMLInputElement>('#economy-admission-price-input');
+const economyAdmissionPriceValue = document.querySelector<HTMLElement>('#economy-admission-price-value');
+const economyRideList = document.querySelector<HTMLElement>('#economy-ride-list');
 const buildCategoryButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-build-category]'));
 const buildPopovers = Array.from(document.querySelectorAll<HTMLElement>('[data-build-popover]'));
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
@@ -213,6 +240,8 @@ if (
   !rideMusicOnButton ||
   !rideMusicOffButton ||
   !rideMusicPresetSelect ||
+  !rideTicketPriceInput ||
+  !rideTicketPriceValue ||
   !placeEntranceButton ||
   !placeExitButton ||
   !continuousRotationToggle ||
@@ -231,7 +260,12 @@ if (
   !guestCloseButton ||
   !buildCatalog ||
   !treeScaleInput ||
-  !treeScaleValue
+  !treeScaleValue ||
+  !parkAdmissionPriceInput ||
+  !parkAdmissionPriceValue ||
+  !economyAdmissionPriceInput ||
+  !economyAdmissionPriceValue ||
+  !economyRideList
 ) {
   throw new Error('Required UI elements were not found.');
 }
@@ -477,6 +511,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.parkEntrance': '공원 입구',
     'section.camera': '카메라',
     'section.simulation': '시뮬레이션',
+    'section.economy': '경제 설정',
     'section.park': '공원',
     'toolGroup.basic': '기본 도구',
     'toolGroup.paths': '길',
@@ -505,6 +540,7 @@ const translations: Record<Language, Record<string, string>> = {
     'ride.musicOn': '음악 ON',
     'ride.musicOff': '음악 OFF',
     'ride.musicPreset': '음악',
+    'ride.ticketPrice': '탑승료',
     'ride.entrance': '입구',
     'ride.exit': '출구',
     'ride.placeEntrance': '입구 설치',
@@ -522,8 +558,11 @@ const translations: Record<Language, Record<string, string>> = {
     'parkEntrance.name': '메인 입구',
     'parkEntrance.open': '오픈',
     'parkEntrance.close': '클로즈',
+    'parkEntrance.admissionFee': '입장료',
     'parkEntrance.openStatus': '공원 오픈 · 손님 입장 중',
     'parkEntrance.closedStatus': '공원 클로즈 · 손님 퇴장 중',
+    'economy.parkAdmission': '공원 입장료',
+    'economy.noRides': '설치된 놀이기구 없음',
     'music.fairgroundOrgan': '페어그라운드 오르간',
     'music.waltzOrgan': '왈츠 오르간',
     'music.musicBox': '오르골',
@@ -552,6 +591,18 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.exiting': '놀이기구에서 나오는 중',
     'guest.seeking': '길을 찾는 중',
     'guest.leaving': '공원 밖으로 나가는 중',
+    'guest.thoughtWander': '공원을 둘러보는 중',
+    'guest.thoughtRide': '{ride}를 타러 가는 중',
+    'guest.thoughtQueueFull': '{ride} 줄이 가득 차서 다른 곳을 찾는 중',
+    'guest.thoughtTooExpensive': '{ride} 요금이 비싸서 다른 곳을 찾는 중',
+    'guest.thoughtNoMoney': '돈이 부족해서 다른 곳을 찾는 중',
+    'guest.thoughtLeaving': '공원 입구로 나가는 중',
+    'guest.thoughtEntering': '공원에 입장하는 중',
+    'guest.thoughtSeeking': '끊긴 길에서 가까운 길을 찾는 중',
+    'guest.thoughtWaiting': '{ride} 줄에서 기다리는 중',
+    'guest.thoughtBoarding': '{ride}에 탑승하는 중',
+    'guest.thoughtRiding': '{ride} 탑승 중',
+    'guest.thoughtExiting': '{ride}에서 나오는 중',
     'pause.pause': '일시정지',
     'pause.resume': '재개',
     'debug.noRide': '손님 {guests}명 · 선택한 놀이기구 없음',
@@ -590,6 +641,8 @@ const translations: Record<Language, Record<string, string>> = {
     'status.musicOn': '{ride} 음악 켜짐',
     'status.musicOff': '{ride} 음악 꺼짐',
     'status.musicPreset': '{ride} 음악: {preset}',
+    'status.priceUpdated': '{ride} 탑승료 {price}',
+    'status.admissionUpdated': '공원 입장료 {price}',
     'status.followOn': '{guest} 카메라 추적 중',
     'status.followOff': '{guest} 카메라 추적 끔',
     'status.guestWindowClosed': '손님 창 닫힘',
@@ -612,6 +665,12 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.queueMoved': '{ride} 대기줄 전진',
     'debug.queueFullWalking': '{ride} 대기줄 가득 참; 손님 계속 이동',
     'debug.walkingIntoQueue': '{ride} 대기줄로 이동 중',
+    'debug.admissionRejected': '{guest} 입장료 {price} 거절',
+    'debug.admissionPaid': '{guest} 입장료 {price} 지불',
+    'debug.rideRejectedPrice': '{guest} {ride} 거절 · 가격/가치 점수 {score}',
+    'debug.rideRejectedQueue': '{guest} {ride} 거절 · 줄 가득 참',
+    'debug.rideTicketPaid': '{guest} {ride} 탑승료 {price} 지불',
+    'debug.routeFailed': '{guest} 목적지 경로 실패',
     'debug.phase': '{ride} {phase}',
     'debug.unloaded': '{ride} 탑승객 하차 완료',
     'debug.reachedQueueSlot': '{ride} 대기 슬롯 도착',
@@ -642,6 +701,7 @@ const translations: Record<Language, Record<string, string>> = {
     'section.parkEntrance': 'Park Entrance',
     'section.camera': 'Camera',
     'section.simulation': 'Simulation',
+    'section.economy': 'Economy',
     'section.park': 'Park',
     'toolGroup.basic': 'Basic Tools',
     'toolGroup.paths': 'Paths',
@@ -670,6 +730,7 @@ const translations: Record<Language, Record<string, string>> = {
     'ride.musicOn': 'Music On',
     'ride.musicOff': 'Music Off',
     'ride.musicPreset': 'Music',
+    'ride.ticketPrice': 'Ticket',
     'ride.entrance': 'Entrance',
     'ride.exit': 'Exit',
     'ride.placeEntrance': 'Place entrance',
@@ -687,8 +748,11 @@ const translations: Record<Language, Record<string, string>> = {
     'parkEntrance.name': 'Main Entrance',
     'parkEntrance.open': 'Open',
     'parkEntrance.close': 'Close',
+    'parkEntrance.admissionFee': 'Admission',
     'parkEntrance.openStatus': 'Park open · guests entering',
     'parkEntrance.closedStatus': 'Park closed · guests leaving',
+    'economy.parkAdmission': 'Park admission',
+    'economy.noRides': 'No rides placed',
     'music.fairgroundOrgan': 'Fairground Organ',
     'music.waltzOrgan': 'Waltz Organ',
     'music.musicBox': 'Music Box',
@@ -717,6 +781,18 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.exiting': 'Leaving a ride',
     'guest.seeking': 'Looking for a path',
     'guest.leaving': 'Leaving the park',
+    'guest.thoughtWander': 'Browsing the park',
+    'guest.thoughtRide': 'Heading to {ride}',
+    'guest.thoughtQueueFull': '{ride} queue is full; finding somewhere else',
+    'guest.thoughtTooExpensive': '{ride} is too expensive; finding somewhere else',
+    'guest.thoughtNoMoney': 'Low on cash; finding somewhere else',
+    'guest.thoughtLeaving': 'Heading to the park exit',
+    'guest.thoughtEntering': 'Entering the park',
+    'guest.thoughtSeeking': 'Looking for a nearby path',
+    'guest.thoughtWaiting': 'Waiting for {ride}',
+    'guest.thoughtBoarding': 'Boarding {ride}',
+    'guest.thoughtRiding': 'Riding {ride}',
+    'guest.thoughtExiting': 'Leaving {ride}',
     'pause.pause': 'Pause',
     'pause.resume': 'Resume',
     'debug.noRide': 'Guests {guests} · no ride selected',
@@ -755,6 +831,8 @@ const translations: Record<Language, Record<string, string>> = {
     'status.musicOn': '{ride} music on',
     'status.musicOff': '{ride} music off',
     'status.musicPreset': '{ride} music: {preset}',
+    'status.priceUpdated': '{ride} ticket {price}',
+    'status.admissionUpdated': 'Park admission {price}',
     'status.followOn': 'Following {guest}',
     'status.followOff': '{guest} follow off',
     'status.guestWindowClosed': 'Guest window closed',
@@ -777,6 +855,12 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.queueMoved': '{ride} queue moved forward',
     'debug.queueFullWalking': '{ride} queue full; guest kept walking',
     'debug.walkingIntoQueue': 'Guest walking into {ride} queue',
+    'debug.admissionRejected': '{guest} rejected admission {price}',
+    'debug.admissionPaid': '{guest} paid admission {price}',
+    'debug.rideRejectedPrice': '{guest} rejected {ride} · value score {score}',
+    'debug.rideRejectedQueue': '{guest} rejected {ride} · queue full',
+    'debug.rideTicketPaid': '{guest} paid {ride} ticket {price}',
+    'debug.routeFailed': '{guest} route failed',
     'debug.phase': '{ride} {phase}',
     'debug.unloaded': '{ride} unloaded riders',
     'debug.reachedQueueSlot': 'Guest reached {ride} queue slot',
@@ -1233,7 +1317,16 @@ const setStatus = (message: string) => {
   statusText.textContent = message;
 };
 
-const formatMoney = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`;
+const formatMoney = (value: number) => {
+  const rounded = Math.round(value * 100) / 100;
+  const hasCents = Math.abs(rounded % 1) > 0.001;
+  return `$${rounded.toLocaleString('en-US', {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const clampPrice = (value: number, max = 100) => clamp(Number.isFinite(value) ? value : 0, 0, max);
 
 const debug = (message: string) => {
   const time = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -1269,11 +1362,24 @@ const refundBuildCost = (amount: number, labelKey: string) => {
   setStatus(t('status.cashChanged', { label: t(labelKey), amount: `+${formatMoney(amount)}` }));
 };
 
+const addParkIncome = (amount: number) => {
+  if (amount <= 0) return;
+  parkCash += amount;
+  refreshStats();
+};
+
 const selectedGuest = () => (selectedGuestId === null ? undefined : guests.find((guest) => guest.id === selectedGuestId));
 
 const formatPercent = (value: number) => `${Math.round(clamp(value, 0, 100))}%`;
 
 const formatGuestStatus = (guest: Guest) => {
+  if (guest.thoughtKey) {
+    const replacements = { ...(guest.thoughtReplacements ?? {}) };
+    const ride = guest.thoughtRideId ? rides.get(guest.thoughtRideId) : undefined;
+    if (ride) replacements.ride = rideLabel(ride);
+    return t(guest.thoughtKey, replacements);
+  }
+  if (guest.thought) return guest.thought;
   if (guest.state === 'walking') return t('guest.walking');
   if (guest.state === 'queueing') return t('guest.queueing');
   if (guest.state === 'waiting') return t('guest.waiting');
@@ -1284,10 +1390,73 @@ const formatGuestStatus = (guest: Guest) => {
   return t('guest.seeking');
 };
 
+const syncAdmissionControls = () => {
+  const admissionFee = parkEntrance?.admissionFee ?? gameConfig.economy.parkAdmissionFee;
+  const value = String(Math.round(admissionFee * 100) / 100);
+  parkAdmissionPriceInput.value = value;
+  parkAdmissionPriceValue.textContent = formatMoney(admissionFee);
+  economyAdmissionPriceInput.value = value;
+  economyAdmissionPriceValue.textContent = formatMoney(admissionFee);
+};
+
+const syncSelectedRidePricing = (ride?: Ride) => {
+  rideTicketPriceInput.disabled = !ride;
+  if (!ride) {
+    rideTicketPriceInput.value = '0';
+    rideTicketPriceValue.textContent = formatMoney(0);
+    return;
+  }
+
+  rideTicketPriceInput.value = String(Math.round(ride.ticketPrice * 100) / 100);
+  rideTicketPriceValue.textContent = formatMoney(ride.ticketPrice);
+};
+
+const syncEconomyPanel = () => {
+  syncAdmissionControls();
+  economyRideList.replaceChildren();
+
+  if (rides.size === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'economy-ride-empty';
+    empty.textContent = t('economy.noRides');
+    economyRideList.append(empty);
+    return;
+  }
+
+  rides.forEach((ride) => {
+    const row = document.createElement('label');
+    row.className = 'price-control-row';
+
+    const label = document.createElement('span');
+    label.textContent = rideLabel(ride);
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.max = '50';
+    input.step = '0.5';
+    input.value = String(Math.round(ride.ticketPrice * 100) / 100);
+
+    const value = document.createElement('strong');
+    value.textContent = formatMoney(ride.ticketPrice);
+
+    input.addEventListener('input', () => {
+      ride.ticketPrice = clampPrice(Number(input.value), 50);
+      value.textContent = formatMoney(ride.ticketPrice);
+      if (selectedRideId === ride.id) syncSelectedRidePricing(ride);
+      setStatus(t('status.priceUpdated', { ride: rideLabel(ride), price: formatMoney(ride.ticketPrice) }));
+    });
+
+    row.append(label, input, value);
+    economyRideList.append(row);
+  });
+};
+
 const updateParkEntrancePanel = () => {
   if (!selectedParkEntrance || !parkEntrance) {
     selectedParkEntrance = false;
     parkEntrancePanel.hidden = true;
+    syncAdmissionControls();
     return;
   }
 
@@ -1296,6 +1465,7 @@ const updateParkEntrancePanel = () => {
   parkEntranceOpenButton.classList.toggle('is-active', parkEntrance.isOpen);
   parkEntranceCloseButton.classList.toggle('is-active', !parkEntrance.isOpen);
   parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
+  syncAdmissionControls();
 };
 
 const setGuestFollow = (enabled: boolean) => {
@@ -1449,6 +1619,7 @@ const updateSelectedRidePanel = () => {
     rideMusicOnButton.disabled = true;
     rideMusicOffButton.disabled = true;
     rideMusicPresetSelect.disabled = true;
+    syncSelectedRidePricing();
     rideOpenButton.classList.remove('is-active');
     rideCloseButton.classList.add('is-active');
     rideMusicOnButton.classList.remove('is-active');
@@ -1466,6 +1637,7 @@ const updateSelectedRidePanel = () => {
   rideMusicOffButton.disabled = false;
   rideMusicPresetSelect.disabled = false;
   rideMusicPresetSelect.value = ride.musicPreset;
+  syncSelectedRidePricing(ride);
   rideOpenButton.classList.toggle('is-active', ride.isOpen);
   rideCloseButton.classList.toggle('is-active', !ride.isOpen);
   rideMusicOnButton.classList.toggle('is-active', ride.musicEnabled);
@@ -1991,6 +2163,7 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
     outsideKey,
     isOpen: true,
     statusLight,
+    admissionFee: gameConfig.economy.parkAdmissionFee,
   } satisfies ParkEntrance;
   buildGroup.add(group);
   return entrance;
@@ -2666,6 +2839,11 @@ const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementR
     riders: 0,
     phase: 'idle',
     phaseTimer: 0,
+    ticketPrice: gameConfig.economy.rideDefaults.carousel.ticketPrice,
+    excitement: gameConfig.economy.rideDefaults.carousel.excitement,
+    intensity: gameConfig.economy.rideDefaults.carousel.intensity,
+    nauseaRating: gameConfig.economy.rideDefaults.carousel.nauseaRating,
+    popularity: gameConfig.economy.rideDefaults.carousel.popularity,
   });
 
   selectedRideId = id;
@@ -2675,6 +2853,7 @@ const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementR
     setStatus(t('status.carouselInstalled'));
   }
   refreshStats();
+  syncEconomyPanel();
   return true;
 };
 
@@ -2705,6 +2884,7 @@ const removeRideById = (rideId: string) => {
   if (selectedRideId === rideId) selectedRideId = null;
   refreshStats();
   updateSelectedRidePanel();
+  syncEconomyPanel();
   refundBuildCost(refund, 'tool.carousel');
   setStatus(t('status.rideRemoved'));
   return 'ride' as const;
@@ -2953,6 +3133,132 @@ const queueSlotsForRide = (ride: Ride) =>
 
 const randomFrom = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
 
+const setGuestThought = (guest: Guest, key: string, replacements: Record<string, string | number> = {}, rideId?: string) => {
+  guest.thoughtKey = key;
+  guest.thoughtReplacements = replacements;
+  guest.thoughtRideId = rideId;
+  guest.thought = t(key, replacements);
+};
+
+const rideEntryPathForGuest = (ride: Ride) => {
+  const tail = queueTailKeysForRide(ride).find((key) => queueEntryPathKeys(key).length > 0);
+  return tail ? queueEntryPathKeys(tail)[0] : undefined;
+};
+
+const queueGuestCountForRide = (ride: Ride) =>
+  guests.filter((guest) => (guest.state === 'queueing' || guest.state === 'waiting') && guest.rideId === ride.id).length;
+
+const rideValueScore = (guest: Guest, ride: Ride) => {
+  const decision = gameConfig.economy.guestDecision;
+  const queuePressure = queueGuestCountForRide(ride) * guest.patience * decision.queuePatiencePenalty;
+  const pricePressure = ride.ticketPrice * guest.priceSensitivity;
+  const nauseaPressure = ride.nauseaRating * decision.nauseaPenalty + guest.nausea * 0.08;
+  const repeatPenalty = guest.visitedRideIds.has(ride.id) ? 10 : 0;
+  const value = ride.excitement * guest.ridePreference * 0.35 + ride.popularity * 0.12 + guest.rideInterest * 18;
+  return value - pricePressure - queuePressure - nauseaPressure - repeatPenalty;
+};
+
+const rejectRideForGuest = (guest: Guest, ride: Ride, thoughtKey: string, debugKey: string, score?: number) => {
+  guest.rejectedRideIds.add(ride.id);
+  guest.rejectionCooldown = gameConfig.economy.guestDecision.rejectionCooldown;
+  guest.happiness = clamp(guest.happiness - 1.5, 0, 100);
+  setGuestThought(guest, thoughtKey, { ride: rideLabel(ride) }, ride.id);
+  debug(t(debugKey, { guest: guestLabel(guest), ride: rideLabel(ride), score: score?.toFixed(1) ?? '-' }));
+};
+
+const shouldGuestRide = (guest: Guest, ride: Ride) => {
+  if (guest.money < ride.ticketPrice) return { accepted: false, reason: 'money' as const, score: Number.NEGATIVE_INFINITY };
+  if (!queueSlotForRide(ride)) return { accepted: false, reason: 'queue' as const, score: Number.NEGATIVE_INFINITY };
+
+  const score = rideValueScore(guest, ride);
+  return {
+    accepted: score >= gameConfig.economy.guestDecision.minimumRideScore,
+    reason: 'price' as const,
+    score,
+  };
+};
+
+const sendGuestAlongPath = (
+  guest: Guest,
+  targetKey: string,
+  intent: GuestIntent,
+  thoughtKey: string,
+  replacements: Record<string, string | number> = {},
+  targetRideId?: string,
+) => {
+  const startKey = paths.has(guest.from) ? guest.from : paths.has(guest.to) ? guest.to : nearestPathKeyFromPosition(guest.mesh.position);
+  if (!startKey || !paths.has(targetKey)) {
+    debug(t('debug.routeFailed', { guest: guestLabel(guest) }));
+    sendGuestSeekingPath(guest);
+    return false;
+  }
+
+  const route = findPathRoute(startKey, targetKey);
+  if (!route) {
+    debug(t('debug.routeFailed', { guest: guestLabel(guest) }));
+    sendGuestSeekingPath(guest);
+    return false;
+  }
+
+  clearGuestQueueState(guest);
+  guest.state = 'walking';
+  guest.intent = intent;
+  guest.targetPathKey = targetKey;
+  guest.targetRideId = targetRideId;
+  guest.from = route[0];
+  guest.to = route[1] ?? route[0];
+  guest.pathRoute = route;
+  guest.pathRouteIndex = 0;
+  guest.queueMoveStart = guest.mesh.position.clone();
+  guest.progress = route.length === 1 ? 1 : 0;
+  guest.pause = 0;
+  guest.mesh.visible = true;
+  setGuestThought(guest, thoughtKey, replacements, targetRideId);
+  return true;
+};
+
+const findBestRideForGuest = (guest: Guest) => {
+  const candidates = [...rides.values()]
+    .filter((ride) => rideConnectionStatus(ride).ready && !guest.rejectedRideIds.has(ride.id))
+    .map((ride) => {
+      const entryPathKey = rideEntryPathForGuest(ride);
+      if (!entryPathKey) return null;
+      const decision = shouldGuestRide(guest, ride);
+      return { ride, entryPathKey, decision, score: decision.score };
+    })
+    .filter((candidate): candidate is { ride: Ride; entryPathKey: string; decision: ReturnType<typeof shouldGuestRide>; score: number } => Boolean(candidate));
+
+  const accepted = candidates.filter((candidate) => candidate.decision.accepted);
+  accepted.sort((a, b) => b.score - a.score);
+  return accepted[0];
+};
+
+const sendGuestWandering = (guest: Guest) => {
+  const target = randomGuestStartPathKey();
+  sendGuestAlongPath(guest, target, 'wander', 'guest.thoughtWander');
+};
+
+const chooseNextGuestDestination = (guest: Guest) => {
+  if (parkEntrance && !parkEntrance.isOpen) {
+    sendGuestLeavingPark(guest);
+    return;
+  }
+
+  const decision = gameConfig.economy.guestDecision;
+  if (guest.happiness <= decision.minimumHappinessToStay || guest.money <= decision.lowCashExitThreshold) {
+    if (!sendGuestLeavingPark(guest)) sendGuestWandering(guest);
+    return;
+  }
+
+  const bestRide = findBestRideForGuest(guest);
+  if (bestRide) {
+    sendGuestAlongPath(guest, bestRide.entryPathKey, 'ride', 'guest.thoughtRide', { ride: rideLabel(bestRide.ride) }, bestRide.ride.id);
+    return;
+  }
+
+  sendGuestWandering(guest);
+};
+
 const syncCarouselRiderVisuals = (ride: Ride) => {
   const targetCount = clamp(Math.round(ride.riders), 0, ride.riderVisuals.length);
 
@@ -2986,6 +3292,9 @@ const finishRide = (guest: Guest) => {
   if (ride) {
     ride.riders = Math.max(0, ride.riders - 1);
     syncCarouselRiderVisuals(ride);
+    guest.visitedRideIds.add(ride.id);
+    guest.happiness = clamp(guest.happiness + ride.excitement * 0.08 - guest.tiredness * 0.012, 0, 100);
+    guest.nausea = clamp(guest.nausea + ride.nauseaRating * 0.12, 0, 100);
     updateSelectedRidePanel();
   }
 
@@ -3011,6 +3320,7 @@ const finishRide = (guest: Guest) => {
   } else {
     placeGuestAt(guest, exitPathKey);
   }
+  if (ride) setGuestThought(guest, 'guest.thoughtExiting', { ride: rideLabel(ride) }, ride.id);
 };
 
 const completeBoardingGuest = (guest: Guest, ride: Ride) => {
@@ -3028,6 +3338,7 @@ const completeBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.progress = 0;
   guest.pause = 0;
   guest.mesh.visible = false;
+  setGuestThought(guest, 'guest.thoughtRiding', { ride: rideLabel(ride) }, ride.id);
   updateSelectedRidePanel();
   debug(t('debug.boarded', { ride: rideLabel(ride), riders: ride.riders, capacity: carouselSeatCount }));
 };
@@ -3044,6 +3355,12 @@ const boardingTargetForRide = (ride: Ride) => {
 };
 
 const startBoardingGuest = (guest: Guest, ride: Ride) => {
+  if (guest.money < ride.ticketPrice) {
+    rejectRideForGuest(guest, ride, 'guest.thoughtNoMoney', 'debug.rideRejectedPrice', rideValueScore(guest, ride));
+    chooseNextGuestDestination(guest);
+    return;
+  }
+
   guest.state = 'boarding';
   guest.rideId = ride.id;
   guest.queueKey = undefined;
@@ -3055,8 +3372,11 @@ const startBoardingGuest = (guest: Guest, ride: Ride) => {
   guest.progress = 0;
   guest.pause = 0;
   guest.mesh.visible = true;
-  guest.money = Math.max(0, guest.money - 2.5);
+  guest.money = Math.max(0, guest.money - ride.ticketPrice);
+  addParkIncome(ride.ticketPrice);
   guest.happiness = clamp(guest.happiness + 4, 0, 100);
+  setGuestThought(guest, 'guest.thoughtBoarding', { ride: rideLabel(ride) }, ride.id);
+  debug(t('debug.rideTicketPaid', { guest: guestLabel(guest), ride: rideLabel(ride), price: formatMoney(ride.ticketPrice) }));
   debug(t('debug.boarding', { ride: rideLabel(ride) }));
 };
 
@@ -3100,6 +3420,7 @@ const tryBoardRide = (guest: Guest, key: string) => {
   guest.pause = 0;
   guest.mesh.visible = true;
   placeGuestInQueueSlot(guest, ride, queueSlot.key, queueSlot.slotIndex);
+  setGuestThought(guest, 'guest.thoughtWaiting', { ride: rideLabel(ride) }, ride.id);
   updateSelectedRidePanel();
   debug(t('debug.waiting', { ride: rideLabel(ride) }));
   return true;
@@ -3123,6 +3444,8 @@ const queueRouteStartKey = (guest: Guest, fallbackKey: string) => {
 const sendGuestToQueueSlot = (guest: Guest, ride: Ride, key: string, slotIndex: number, startKey = queueRouteStartKey(guest, key)) => {
   const route = queueRouteToSlot(ride, startKey, key);
   guest.state = 'queueing';
+  guest.intent = 'ride';
+  guest.targetRideId = ride.id;
   guest.rideId = ride.id;
   guest.from = startKey;
   guest.to = route[0];
@@ -3133,6 +3456,7 @@ const sendGuestToQueueSlot = (guest: Guest, ride: Ride, key: string, slotIndex: 
   guest.queueMoveStart = guest.mesh.position.clone();
   guest.progress = 0;
   guest.pause = 0;
+  setGuestThought(guest, 'guest.thoughtRide', { ride: rideLabel(ride) }, ride.id);
 };
 
 const compactQueueForRide = (ride: Ride) => {
@@ -3178,23 +3502,39 @@ const rideForQueueKey = (queueKey: string) =>
 
 const tryEnterQueueFromPath = (guest: Guest, pathKey: string) => {
   if (!paths.has(pathKey)) return false;
-  if (guest.rideInterest < 0.46) return false;
 
   const queueKey = adjacentKeys(parseKey(pathKey)).find((candidate) => {
     const ride = rideForQueueKey(candidate);
-    return Boolean(ride && queueTailKeysForRide(ride).includes(candidate) && queueEntryPathKeys(candidate).includes(pathKey));
+    return Boolean(
+      ride &&
+        (!guest.targetRideId || guest.targetRideId === ride.id) &&
+        queueTailKeysForRide(ride).includes(candidate) &&
+        queueEntryPathKeys(candidate).includes(pathKey),
+    );
   });
   if (!queueKey) return false;
 
   const ride = rideForQueueKey(queueKey);
   if (!ride) return false;
 
+  const decision = shouldGuestRide(guest, ride);
+  if (!decision.accepted) {
+    rejectRideForGuest(
+      guest,
+      ride,
+      decision.reason === 'queue' ? 'guest.thoughtQueueFull' : decision.reason === 'money' ? 'guest.thoughtNoMoney' : 'guest.thoughtTooExpensive',
+      decision.reason === 'queue' ? 'debug.rideRejectedQueue' : 'debug.rideRejectedPrice',
+      decision.score,
+    );
+    chooseNextGuestDestination(guest);
+    return true;
+  }
+
   const queueSlot = queueSlotForRide(ride);
   if (!queueSlot) {
-    debug(t('debug.queueFullWalking', { ride: rideLabel(ride) }));
-    guest.pause = 0.6;
-    guest.to = chooseNextPath(pathKey);
-    return false;
+    rejectRideForGuest(guest, ride, 'guest.thoughtQueueFull', 'debug.rideRejectedQueue');
+    chooseNextGuestDestination(guest);
+    return true;
   }
 
   const queueRoute = queueRouteToSlot(ride, queueKey, queueSlot.key);
@@ -3465,6 +3805,8 @@ const clearGuestQueueState = (guest: Guest) => {
   guest.queueRouteIndex = undefined;
   guest.pathRoute = undefined;
   guest.pathRouteIndex = undefined;
+  guest.targetPathKey = undefined;
+  guest.targetRideId = undefined;
   guest.boardingTarget = undefined;
   guest.rideTime = 0;
 };
@@ -3478,6 +3820,7 @@ const randomWanderTargetFrom = (position: THREE.Vector3) => {
 const sendGuestSeekingPath = (guest: Guest) => {
   clearGuestQueueState(guest);
   guest.state = 'seeking';
+  guest.intent = 'wander';
   guest.from = nearestPathKeyFromPosition(guest.mesh.position) ?? guest.from;
   guest.to = guest.from;
   guest.progress = 0;
@@ -3486,6 +3829,7 @@ const sendGuestSeekingPath = (guest: Guest) => {
   guest.queueMoveStart = guest.mesh.position.clone();
   guest.wanderTarget = randomWanderTargetFrom(guest.mesh.position);
   guest.mesh.visible = true;
+  setGuestThought(guest, 'guest.thoughtSeeking');
 };
 
 const removeGuest = (guest: Guest) => {
@@ -3524,6 +3868,8 @@ const sendGuestLeavingPark = (guest: Guest) => {
 
   clearGuestQueueState(guest);
   guest.state = 'leaving';
+  guest.intent = 'leaving';
+  guest.targetPathKey = parkEntrance.entryPathKey;
   guest.from = route[0];
   guest.to = route[1] ?? route[0];
   guest.pathRoute = route;
@@ -3532,6 +3878,7 @@ const sendGuestLeavingPark = (guest: Guest) => {
   guest.progress = 0;
   guest.pause = 0;
   guest.mesh.visible = true;
+  setGuestThought(guest, 'guest.thoughtLeaving');
   return true;
 };
 
@@ -3550,13 +3897,36 @@ const resumeGuestInsidePark = (guest: Guest) => {
   guest.pause = Math.random() * 0.6;
   guest.queueMoveStart = guest.mesh.position.clone();
   guest.mesh.visible = true;
+  chooseNextGuestDestination(guest);
 };
+
+const createGuestProfile = () => ({
+  money: 32 + Math.random() * 68,
+  hunger: 8 + Math.random() * 22,
+  tiredness: 4 + Math.random() * 18,
+  happiness: 66 + Math.random() * 26,
+  nausea: Math.random() * 8,
+  rideInterest: Math.random(),
+  intent: 'wander' as GuestIntent,
+  priceSensitivity: 0.55 + Math.random() * 1.15,
+  patience: 0.55 + Math.random() * 1.15,
+  ridePreference: 0.55 + Math.random() * 1.1,
+  visitedRideIds: new Set<string>(),
+  rejectedRideIds: new Set<string>(),
+  thought: t('guest.thoughtWander'),
+  thoughtKey: 'guest.thoughtWander',
+  rideTime: 0,
+});
+
+const admissionScoreForGuest = (profile: ReturnType<typeof createGuestProfile>, admissionFee: number) =>
+  gameConfig.economy.guestDecision.admissionValue + profile.happiness * 0.12 + profile.rideInterest * 10 - admissionFee * profile.priceSensitivity;
 
 const spawnGuest = (startKey?: string) => {
   const from = startKey ?? randomGuestStartPathKey();
   const to = chooseNextPath(from);
   const id = ++guestSerial;
   const mesh = createGuestMesh(id);
+  const profile = createGuestProfile();
   const guest: Guest = {
     id,
     mesh,
@@ -3566,17 +3936,12 @@ const spawnGuest = (startKey?: string) => {
     speed: 0.35 + Math.random() * 0.28,
     pause: startKey ? 0 : Math.random() * 0.8,
     state: 'walking',
-    money: 32 + Math.random() * 68,
-    hunger: 8 + Math.random() * 22,
-    tiredness: 4 + Math.random() * 18,
-    happiness: 66 + Math.random() * 26,
-    nausea: Math.random() * 8,
-    rideInterest: Math.random(),
-    rideTime: 0,
+    ...profile,
   };
   placeGuestAt(guest, from);
   guestGroup.add(mesh);
   guests.push(guest);
+  chooseNextGuestDestination(guest);
 };
 
 const spawnGuestAtParkEntrance = (initialProgress = 0) => {
@@ -3584,6 +3949,15 @@ const spawnGuestAtParkEntrance = (initialProgress = 0) => {
 
   const id = ++guestSerial;
   const mesh = createGuestMesh(id);
+  const profile = createGuestProfile();
+  const admissionFee = parkEntrance.admissionFee;
+  if (profile.money < admissionFee || admissionScoreForGuest(profile, admissionFee) < 0) {
+    debug(t('debug.admissionRejected', { guest: `${t('guest.label')} #${id}`, price: formatMoney(admissionFee) }));
+    return false;
+  }
+
+  profile.money -= admissionFee;
+  addParkIncome(admissionFee);
   const progress = clamp(initialProgress, 0, 0.92);
   const guest: Guest = {
     id,
@@ -3594,13 +3968,9 @@ const spawnGuestAtParkEntrance = (initialProgress = 0) => {
     speed: 0.35 + Math.random() * 0.28,
     pause: 0,
     state: 'walking',
-    money: 32 + Math.random() * 68,
-    hunger: 8 + Math.random() * 22,
-    tiredness: 4 + Math.random() * 18,
-    happiness: 66 + Math.random() * 26,
-    nausea: Math.random() * 8,
-    rideInterest: Math.random(),
-    rideTime: 0,
+    ...profile,
+    thought: t('guest.thoughtEntering'),
+    thoughtKey: 'guest.thoughtEntering',
   };
   const fromCoord = parseKey(parkEntrance.outsideKey);
   const toCoord = parseKey(parkEntrance.entryPathKey);
@@ -3611,6 +3981,7 @@ const spawnGuestAtParkEntrance = (initialProgress = 0) => {
   guestGroup.add(mesh);
   guests.push(guest);
   refreshStats();
+  debug(t('debug.admissionPaid', { guest: guestLabel(guest), price: formatMoney(admissionFee) }));
   debug(t('status.guestEnteredPark', { guest: guestLabel(guest) }));
   return true;
 };
@@ -3632,6 +4003,14 @@ const resetInvalidGuests = () => {
 };
 
 const updateGuestNeeds = (guest: Guest, delta: number) => {
+  if (guest.rejectionCooldown !== undefined) {
+    guest.rejectionCooldown = Math.max(0, guest.rejectionCooldown - delta);
+    if (guest.rejectionCooldown <= 0) {
+      guest.rejectedRideIds.clear();
+      guest.rejectionCooldown = undefined;
+    }
+  }
+
   const queueStress = guest.state === 'queueing' || guest.state === 'waiting' ? 1.35 : 1;
   const seekingStress = guest.state === 'seeking' ? 1.8 : 1;
   guest.hunger = clamp(guest.hunger + delta * 0.32, 0, 100);
@@ -3721,6 +4100,7 @@ const updateGuests = (delta: number) => {
       guest.queueMoveStart = undefined;
       guest.boardingTarget = undefined;
       placeGuestInQueueSlot(guest, ride, guest.queueKey, guest.queueSlotIndex);
+      setGuestThought(guest, 'guest.thoughtWaiting', { ride: rideLabel(ride) }, ride.id);
       debug(t('debug.reachedQueueSlot', { ride: rideLabel(guest.rideId) }));
       return;
     }
@@ -3807,6 +4187,7 @@ const updateGuests = (delta: number) => {
         guest.wanderTarget = undefined;
         guest.seekTimer = undefined;
         placeGuestAt(guest, nearestPathKey);
+        chooseNextGuestDestination(guest);
         return;
       }
 
@@ -3829,6 +4210,11 @@ const updateGuests = (delta: number) => {
 
     if (tryEnterQueueFromPath(guest, guest.from)) return;
 
+    if (guest.state !== 'exiting' && guest.from !== parkEntrance?.outsideKey && (!isWalkway(guest.from) || !isWalkway(guest.to))) {
+      sendGuestSeekingPath(guest);
+      return;
+    }
+
     guest.progress += delta * guest.speed;
     const from = parseKey(guest.from);
     const to = parseKey(guest.to);
@@ -3845,9 +4231,55 @@ const updateGuests = (delta: number) => {
       if (guest.state === 'exiting') {
         guest.state = 'walking';
         guest.rideId = undefined;
+        guest.targetRideId = undefined;
+        chooseNextGuestDestination(guest);
+        return;
       }
+
+      if (parkEntrance && previous === parkEntrance.outsideKey && guest.from === parkEntrance.entryPathKey) {
+        chooseNextGuestDestination(guest);
+        return;
+      }
+
       if (tryEnterQueueFromPath(guest, guest.from)) return;
-      guest.to = chooseNextPath(guest.from, previous);
+
+      if (guest.pathRoute && guest.pathRoute.length > 0) {
+        const routeIndex = guest.pathRouteIndex ?? 0;
+        const nextIndex = routeIndex + 1;
+        if (nextIndex >= guest.pathRoute.length - 1) {
+          guest.pathRoute = undefined;
+          guest.pathRouteIndex = undefined;
+          guest.targetPathKey = undefined;
+          chooseNextGuestDestination(guest);
+          return;
+        }
+
+        const nextKey = guest.pathRoute[nextIndex + 1];
+        if (!nextKey || !paths.has(nextKey)) {
+          const targetRide = guest.targetRideId ? rides.get(guest.targetRideId) : undefined;
+          if (
+            guest.targetPathKey &&
+            sendGuestAlongPath(
+              guest,
+              guest.targetPathKey,
+              guest.intent,
+              targetRide ? 'guest.thoughtRide' : guest.intent === 'leaving' ? 'guest.thoughtLeaving' : 'guest.thoughtWander',
+              targetRide ? { ride: rideLabel(targetRide) } : {},
+              guest.targetRideId,
+            )
+          )
+            return;
+          sendGuestSeekingPath(guest);
+          return;
+        }
+
+        guest.pathRouteIndex = nextIndex;
+        guest.to = nextKey;
+      } else {
+        chooseNextGuestDestination(guest);
+        return;
+      }
+
       guest.progress = 0;
       guest.pause = Math.random() > 0.88 ? 0.8 + Math.random() * 1.6 : 0;
     }
@@ -4228,6 +4660,22 @@ const setSelectedRideMusicPreset = (preset: CarouselMusicPreset) => {
   setStatus(t('status.musicPreset', { ride: rideLabel(ride), preset: musicPresetLabel(preset) }));
 };
 
+const setSelectedRideTicketPrice = (value: number) => {
+  const ride = selectedRide();
+  if (!ride) return;
+  ride.ticketPrice = clampPrice(value, 50);
+  syncSelectedRidePricing(ride);
+  syncEconomyPanel();
+  setStatus(t('status.priceUpdated', { ride: rideLabel(ride), price: formatMoney(ride.ticketPrice) }));
+};
+
+const setParkAdmissionFee = (value: number) => {
+  if (!parkEntrance) return;
+  parkEntrance.admissionFee = clampPrice(value, 100);
+  syncAdmissionControls();
+  setStatus(t('status.admissionUpdated', { price: formatMoney(parkEntrance.admissionFee) }));
+};
+
 const setParkEntranceOpen = (isOpen: boolean) => {
   if (!parkEntrance) return;
   parkEntrance.isOpen = isOpen;
@@ -4251,6 +4699,9 @@ rideMusicOnButton.addEventListener('click', () => setSelectedRideMusic(true));
 rideMusicOffButton.addEventListener('click', () => setSelectedRideMusic(false));
 parkEntranceOpenButton.addEventListener('click', () => setParkEntranceOpen(true));
 parkEntranceCloseButton.addEventListener('click', () => setParkEntranceOpen(false));
+rideTicketPriceInput.addEventListener('input', () => setSelectedRideTicketPrice(Number(rideTicketPriceInput.value)));
+parkAdmissionPriceInput.addEventListener('input', () => setParkAdmissionFee(Number(parkAdmissionPriceInput.value)));
+economyAdmissionPriceInput.addEventListener('input', () => setParkAdmissionFee(Number(economyAdmissionPriceInput.value)));
 rideMusicPresetSelect.addEventListener('change', () => {
   const preset = rideMusicPresetSelect.value as CarouselMusicPreset;
   if (!carouselMusicPresets[preset]) return;
@@ -4277,6 +4728,7 @@ languageSelect.addEventListener('change', () => {
   updateSelectedRidePanel();
   updateParkEntrancePanel();
   updateSelectedGuestWindow();
+  syncEconomyPanel();
   updateDebugStatus();
   setStatus(t('status.language'));
 });
@@ -4493,6 +4945,7 @@ setViewport();
 applyStaticTranslations();
 syncTreeScaleControl();
 seedPark();
+syncEconomyPanel();
 setTool('select');
 updateSelectedRidePanel();
 

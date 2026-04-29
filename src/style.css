@@ -42,6 +42,7 @@ button {
   border-right: 1px solid rgb(25 35 45 / 16%);
   background: rgb(239 243 234 / 94%);
   box-shadow: 8px 0 28px rgb(39 56 47 / 16%);
+  overflow-y: auto;
 }
 
 .brand {
@@ -539,6 +540,55 @@ button {
 .ride-music-select:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.price-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 54px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.price-control-row span {
+  color: #52646d;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.price-control-row input {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid rgb(27 42 54 / 18%);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #263844;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.price-control-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.price-control-row strong {
+  color: #1f2d36;
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.economy-ride-list {
+  display: grid;
+  gap: 8px;
+}
+
+.economy-ride-empty {
+  color: #52646d;
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .ride-actions {

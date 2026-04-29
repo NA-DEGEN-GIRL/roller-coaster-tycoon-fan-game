@@ -114,6 +114,11 @@
                 <option value="militaryBandOrgan" data-i18n="music.militaryBandOrgan">밀리터리 밴드 오르간</option>
               </select>
             </label>
+            <label class="price-control-row">
+              <span data-i18n="ride.ticketPrice">탑승료</span>
+              <input id="ride-ticket-price-input" type="number" min="0" max="50" step="0.5" value="0" disabled />
+              <strong id="ride-ticket-price-value">$0</strong>
+            </label>
             <div class="ride-actions" aria-label="선택한 놀이기구 배치 도구" data-i18n-aria="aria.rideTools">
               <button id="place-entrance-button" class="ride-action" type="button" title="입구 설치" data-i18n-title="ride.placeEntrance" disabled data-ride-tool="entrance">
                 <span class="icon entrance-icon"></span>
@@ -138,6 +143,11 @@
               <button id="park-entrance-open-button" class="ride-state-button open is-active" type="button" data-i18n="parkEntrance.open">오픈</button>
               <button id="park-entrance-close-button" class="ride-state-button closed" type="button" data-i18n="parkEntrance.close">클로즈</button>
             </div>
+            <label class="price-control-row">
+              <span data-i18n="parkEntrance.admissionFee">입장료</span>
+              <input id="park-admission-price-input" type="number" min="0" max="100" step="1" value="0" />
+              <strong id="park-admission-price-value">$0</strong>
+            </label>
           </div>
         </div>
 
@@ -158,6 +168,18 @@
             <button class="speed-button" type="button" data-speed="2">2x</button>
             <button class="speed-button" type="button" data-speed="4">4x</button>
             <button class="speed-button" type="button" data-speed="8">8x</button>
+          </div>
+        </div>
+
+        <div class="panel-section economy-panel">
+          <span class="section-label" data-i18n="section.economy">경제 설정</span>
+          <div class="ride-card">
+            <label class="price-control-row">
+              <span data-i18n="economy.parkAdmission">공원 입장료</span>
+              <input id="economy-admission-price-input" type="number" min="0" max="100" step="1" value="0" />
+              <strong id="economy-admission-price-value">$0</strong>
+            </label>
+            <div id="economy-ride-list" class="economy-ride-list"></div>
           </div>
         </div>
 
