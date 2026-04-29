@@ -165,6 +165,8 @@ type ParkEntrance = {
   outsideKey: string;
   isOpen: boolean;
   statusLight: THREE.Mesh;
+  statusPointLight: THREE.PointLight;
+  statusGlow: THREE.Mesh;
   admissionFee: number;
 };
 
@@ -1656,7 +1658,7 @@ const updateParkEntrancePanel = () => {
   parkEntranceStatus.textContent = t(parkEntrance.isOpen ? 'parkEntrance.openStatus' : 'parkEntrance.closedStatus');
   parkEntranceOpenButton.classList.toggle('is-active', parkEntrance.isOpen);
   parkEntranceCloseButton.classList.toggle('is-active', !parkEntrance.isOpen);
-  parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
+  updateParkEntranceStatusLight();
   syncAdmissionControls();
 };
 
@@ -1791,6 +1793,20 @@ const updateRideVisual = (ride: Ride) => {
   ride.statusLight.material = connection.ready ? openMaterial : closedMaterial;
 };
 
+const updateParkEntranceStatusLight = () => {
+  if (!parkEntrance) return;
+
+  const night = timeOfDay === 'night';
+  const color = parkEntrance.isOpen ? 0x27ae60 : 0xc0392b;
+  parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
+  parkEntrance.statusPointLight.color.setHex(color);
+  parkEntrance.statusPointLight.intensity = night ? 0.9 : 0;
+
+  const glowMaterial = parkEntrance.statusGlow.material as THREE.MeshBasicMaterial;
+  glowMaterial.color.setHex(color);
+  glowMaterial.opacity = night ? 0.28 : 0;
+};
+
 const updateLampVisuals = () => {
   const night = timeOfDay === 'night';
   lamps.forEach((lamp) => {
@@ -1841,6 +1857,7 @@ const applyTimeOfDay = () => {
   document.body.classList.toggle('is-night', night);
   dayButton.classList.toggle('is-active', !night);
   nightButton.classList.toggle('is-active', night);
+  updateParkEntranceStatusLight();
   updateLampVisuals();
   updateCarouselNightLights();
 };
@@ -2638,6 +2655,22 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
   statusLight.castShadow = true;
   group.add(statusLight);
 
+  const statusPointLight = new THREE.PointLight(0x27ae60, timeOfDay === 'night' ? 0.9 : 0, 4.5, 2.1);
+  statusPointLight.position.copy(statusLight.position);
+  group.add(statusPointLight);
+
+  const statusGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.42, 18, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0x27ae60,
+      transparent: true,
+      opacity: timeOfDay === 'night' ? 0.28 : 0,
+      depthWrite: false,
+    }),
+  );
+  statusGlow.position.copy(statusLight.position);
+  group.add(statusGlow);
+
   group.traverse((child) => {
     child.userData.parkEntrance = true;
   });
@@ -2648,6 +2681,8 @@ const createParkEntrance = (outsideKey: string, entryPathKey: string) => {
     outsideKey,
     isOpen: true,
     statusLight,
+    statusPointLight,
+    statusGlow,
     admissionFee: gameConfig.economy.parkAdmissionFee,
   } satisfies ParkEntrance;
   buildGroup.add(group);
@@ -4371,7 +4406,7 @@ const animateGate = (gate: RideGate | undefined, isOpen: boolean, delta: number)
 };
 
 const updateGateAnimations = (delta: number) => {
-  if (parkEntrance) parkEntrance.statusLight.material = parkEntrance.isOpen ? openMaterial : closedMaterial;
+  updateParkEntranceStatusLight();
   rides.forEach((ride) => {
     const entrance = ride.entranceKey ? entrances.get(ride.entranceKey) : undefined;
     const exit = ride.exitKey ? exits.get(ride.exitKey) : undefined;
