@@ -26,25 +26,54 @@
 
         <div class="panel-section">
           <span class="section-label" data-i18n="section.build">건설</span>
-          <div class="tool-grid" role="group" aria-label="건설 도구" data-i18n-aria="aria.buildTools">
-            <button class="tool is-active" type="button" title="선택" data-i18n-title="tool.select" data-tool="select">
-              <span class="icon select-icon"></span>
-            </button>
-            <button class="tool" type="button" title="길" data-i18n-title="tool.path" data-tool="path">
-              <span class="icon path-icon"></span>
-            </button>
-            <button class="tool" type="button" title="대기줄 길" data-i18n-title="tool.queue" data-tool="queue">
-              <span class="icon queue-icon"></span>
-            </button>
-            <button class="tool" type="button" title="회전목마 세트" data-i18n-title="tool.carousel" data-tool="carousel">
-              <span class="icon carousel-icon"></span>
-            </button>
-            <button class="tool" type="button" title="나무" data-i18n-title="tool.tree" data-tool="tree">
-              <span class="icon tree-icon"></span>
-            </button>
-            <button class="tool" type="button" title="철거" data-i18n-title="tool.bulldoze" data-tool="bulldoze">
-              <span class="icon bulldoze-icon"></span>
-            </button>
+          <div class="build-catalog" role="group" aria-label="건설 도구" data-i18n-aria="aria.buildTools">
+            <div class="tool-category">
+              <span class="tool-category-label" data-i18n="toolGroup.basic">기본 도구</span>
+              <div class="tool-grid">
+                <button class="tool is-active" type="button" title="선택" data-i18n-title="tool.select" data-tool="select">
+                  <span class="icon select-icon"></span>
+                  <span data-i18n="tool.select">선택</span>
+                </button>
+                <button class="tool" type="button" title="철거" data-i18n-title="tool.bulldoze" data-tool="bulldoze">
+                  <span class="icon bulldoze-icon"></span>
+                  <span data-i18n="tool.bulldoze">철거</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="tool-category">
+              <span class="tool-category-label" data-i18n="toolGroup.paths">길</span>
+              <div class="tool-grid">
+                <button class="tool" type="button" title="일반 길" data-i18n-title="tool.path" data-tool="path">
+                  <span class="icon path-icon"></span>
+                  <span data-i18n="tool.path">일반 길</span>
+                </button>
+                <button class="tool" type="button" title="대기줄 길" data-i18n-title="tool.queue" data-tool="queue">
+                  <span class="icon queue-icon"></span>
+                  <span data-i18n="tool.queue">대기줄 길</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="tool-category">
+              <span class="tool-category-label" data-i18n="toolGroup.gentleRides">잔잔한 놀이기구</span>
+              <div class="tool-grid">
+                <button class="tool" type="button" title="회전목마" data-i18n-title="tool.carousel" data-tool="carousel">
+                  <span class="icon carousel-icon"></span>
+                  <span data-i18n="tool.carousel">회전목마</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="tool-category">
+              <span class="tool-category-label" data-i18n="toolGroup.scenery">꾸미기</span>
+              <div class="tool-grid">
+                <button class="tool" type="button" title="전나무" data-i18n-title="tool.tree" data-tool="tree">
+                  <span class="icon tree-icon"></span>
+                  <span data-i18n="tool.tree">전나무</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

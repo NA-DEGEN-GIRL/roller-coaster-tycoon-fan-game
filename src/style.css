@@ -100,9 +100,26 @@ button {
   text-transform: uppercase;
 }
 
+.build-catalog {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-category {
+  display: grid;
+  gap: 6px;
+}
+
+.tool-category-label {
+  color: #66747b;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .tool-grid {
   display: grid;
-  grid-template-columns: repeat(4, 48px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -121,18 +138,29 @@ button {
 
 .tool {
   display: grid;
-  width: 48px;
-  aspect-ratio: 1;
-  place-items: center;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 8px;
   border: 1px solid rgb(27 42 54 / 22%);
   border-radius: 8px;
   background: #ffffff;
   color: #263844;
   cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 900;
   transition:
     transform 140ms ease,
     border-color 140ms ease,
     background 140ms ease;
+}
+
+.tool span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool:hover {
