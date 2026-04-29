@@ -851,11 +851,23 @@ const createCrowdAudio = () => {
   gain.gain.value = 0;
   gain.connect(masterMusicGain);
 
-  const layers = ['/audio/crowd-ambience.ogg', '/audio/crowd-laughs.ogg'].map((src) => {
+  const crowdLayerSources = [
+    '/audio/crowd-ambience.ogg',
+    '/audio/crowd-laughs.ogg',
+    '/audio/generated/crowd-chatter-1.mp3',
+    '/audio/generated/crowd-chatter-2.mp3',
+    '/audio/generated/crowd-chatter-3.mp3',
+    '/audio/generated/crowd-chatter-4.mp3',
+    '/audio/generated/crowd-laugh-1.mp3',
+    '/audio/generated/crowd-laugh-2.mp3',
+  ];
+
+  const layers = crowdLayerSources.map((src, index) => {
     const audio = new Audio(src);
     audio.loop = true;
     audio.preload = 'auto';
-    audio.volume = 1;
+    audio.volume = src.includes('laugh') ? 0.42 : 0.72;
+    audio.playbackRate = 0.94 + (index % 5) * 0.035;
     const source = context.createMediaElementSource(audio);
     source.connect(gain);
     return audio;
@@ -899,6 +911,9 @@ const updateCrowdAudio = () => {
 
   crowdAudio.layers.forEach((layer) => {
     if (targetGain <= 0.004) return;
+    if (layer.duration > 0 && layer.currentTime === 0) {
+      layer.currentTime = Math.random() * Math.max(0, layer.duration - 0.2);
+    }
     if (layer.paused) void layer.play().catch(() => undefined);
   });
 };
