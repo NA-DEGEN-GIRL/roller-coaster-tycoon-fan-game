@@ -149,6 +149,35 @@ button {
   display: none;
 }
 
+.build-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 44px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid rgb(27 42 54 / 10%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 68%);
+}
+
+.build-control-row span {
+  color: #52646d;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.build-control-row input {
+  width: 100%;
+  accent-color: #27ae60;
+}
+
+.build-control-row strong {
+  color: #263844;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
 .tool-category-label {
   color: #66747b;
   font-size: 0.68rem;

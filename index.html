@@ -75,6 +75,11 @@
 
             <div class="build-popover" data-build-popover="scenery" hidden>
               <span class="tool-category-label" data-i18n="toolGroup.scenery">꾸미기</span>
+              <label class="build-control-row">
+                <span data-i18n="build.treeScale">전나무 크기</span>
+                <input id="tree-scale-input" type="range" min="55" max="175" step="5" value="100" />
+                <strong id="tree-scale-value">100%</strong>
+              </label>
               <div class="tool-grid">
                 <button class="tool" type="button" title="전나무" data-i18n-title="tool.tree" data-tool="tree">
                   <span class="icon tree-icon"></span>
@@ -158,6 +163,7 @@
 
         <div class="panel-section stats">
           <span class="section-label" data-i18n="section.park">공원</span>
+          <div><span data-i18n="stats.cash">현금</span><strong id="cash-count">$0</strong></div>
           <div><span data-i18n="stats.guests">손님</span><strong id="guest-count">0</strong></div>
           <div><span data-i18n="stats.paths">길</span><strong id="path-count">0</strong></div>
           <div><span data-i18n="stats.queues">대기줄</span><strong id="queue-count">0</strong></div>

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import './style.css';
+import { gameConfig } from './gameConfig';
 
 type Tool = 'select' | 'path' | 'queue' | 'carousel' | 'entrance' | 'exit' | 'tree' | 'bulldoze';
 
@@ -137,6 +138,8 @@ type TreeInstance = {
   group: THREE.Group;
   coord: GridCoord;
   position: THREE.Vector3;
+  rotationStep: number;
+  scale: number;
 };
 
 type PickedBuildObject =
@@ -147,6 +150,7 @@ type PickedBuildObject =
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button');
 const statusText = document.querySelector<HTMLSpanElement>('#status-text');
+const cashCount = document.querySelector<HTMLElement>('#cash-count');
 const guestCount = document.querySelector<HTMLElement>('#guest-count');
 const pathCount = document.querySelector<HTMLElement>('#path-count');
 const queueCount = document.querySelector<HTMLElement>('#queue-count');
@@ -180,6 +184,8 @@ const guestNausea = document.querySelector<HTMLElement>('#guest-nausea');
 const guestFollowButton = document.querySelector<HTMLButtonElement>('#guest-follow-button');
 const guestCloseButton = document.querySelector<HTMLButtonElement>('#guest-close-button');
 const buildCatalog = document.querySelector<HTMLElement>('.build-catalog');
+const treeScaleInput = document.querySelector<HTMLInputElement>('#tree-scale-input');
+const treeScaleValue = document.querySelector<HTMLElement>('#tree-scale-value');
 const buildCategoryButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-build-category]'));
 const buildPopovers = Array.from(document.querySelectorAll<HTMLElement>('[data-build-popover]'));
 const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
@@ -190,6 +196,7 @@ if (
   !canvas ||
   !pauseButton ||
   !statusText ||
+  !cashCount ||
   !guestCount ||
   !pathCount ||
   !queueCount ||
@@ -222,7 +229,9 @@ if (
   !guestNausea ||
   !guestFollowButton ||
   !guestCloseButton ||
-  !buildCatalog
+  !buildCatalog ||
+  !treeScaleInput ||
+  !treeScaleValue
 ) {
   throw new Error('Required UI elements were not found.');
 }
@@ -308,6 +317,20 @@ const carouselPreviewAccentMaterial = new THREE.MeshStandardMaterial({
   depthWrite: false,
   side: THREE.DoubleSide,
 });
+const treePreviewTrunkMaterial = new THREE.MeshStandardMaterial({
+  color: 0x8f6a3f,
+  roughness: 0.8,
+  transparent: true,
+  opacity: 0.55,
+  depthWrite: false,
+});
+const treePreviewCanopyMaterial = new THREE.MeshStandardMaterial({
+  color: 0x3f9355,
+  roughness: 0.78,
+  transparent: true,
+  opacity: 0.5,
+  depthWrite: false,
+});
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -390,6 +413,7 @@ let lastDraggedBulldozeKey: string | null = null;
 let lastQueueBuildKey: string | null = null;
 let bulldozeDragTarget: BulldozeTarget | null = null;
 let placementRotationStep = 0;
+let treePlacementScale = 1;
 let lastDragX = 0;
 let lastDragY = 0;
 let followSelectedGuest = false;
@@ -400,6 +424,7 @@ let audioContext: AudioContext | null = null;
 let masterMusicGain: GainNode | null = null;
 let crowdAudio: CrowdAudioState | null = null;
 let guestSpawnTimer = 2.5;
+let parkCash = gameConfig.economy.startingCash;
 
 const keyOf = (x: number, z: number) => `${x},${z}`;
 
@@ -466,6 +491,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.bulldoze': '철거',
     'tool.entrance': '입구',
     'tool.exit': '출구',
+    'build.treeScale': '전나무 크기',
     'toolStatus.select': '선택 도구 선택됨',
     'toolStatus.path': '일반 길 도구 선택됨',
     'toolStatus.queue': '대기줄 길 도구 선택됨',
@@ -503,6 +529,7 @@ const translations: Record<Language, Record<string, string>> = {
     'music.musicBox': '오르골',
     'music.militaryBandOrgan': '밀리터리 밴드 오르간',
     'stats.guests': '손님',
+    'stats.cash': '현금',
     'stats.paths': '길',
     'stats.queues': '대기줄',
     'stats.rides': '놀이기구',
@@ -532,6 +559,8 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.booting': '시뮬레이션 시작 중',
     'status.language': '언어: 한국어',
     'status.speed': '시뮬레이션 속도 {speed}x',
+    'status.cashChanged': '{label}: {amount}',
+    'status.notEnoughCash': '현금 부족 · 필요 {cost}, 보유 {cash}',
     'status.pathBuilt': '길 설치: {key}',
     'status.selectRideFirst': '먼저 놀이기구를 선택하세요',
     'status.entranceAlready': '입구가 이미 설치되어 있습니다',
@@ -575,6 +604,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.zoom': '확대 {zoom}%',
     'status.viewRotated': '{key} 방향으로 화면 회전',
     'status.placementRotated': '설치 방향 {degrees}도',
+    'status.treeScale': '전나무 크기 {scale}%',
     'debug.boarded': '{ride} 손님 탑승 완료 ({riders}/{capacity})',
     'debug.boarding': '{ride} 손님 탑승 중',
     'debug.queueFullLeft': '{ride} 대기줄 가득 참; 손님 이탈',
@@ -626,6 +656,7 @@ const translations: Record<Language, Record<string, string>> = {
     'tool.bulldoze': 'Bulldoze',
     'tool.entrance': 'Entrance',
     'tool.exit': 'Exit',
+    'build.treeScale': 'Fir tree size',
     'toolStatus.select': 'Select tool selected',
     'toolStatus.path': 'Path tool selected',
     'toolStatus.queue': 'Queue path tool selected',
@@ -663,6 +694,7 @@ const translations: Record<Language, Record<string, string>> = {
     'music.musicBox': 'Music Box',
     'music.militaryBandOrgan': 'Military Band Organ',
     'stats.guests': 'Guests',
+    'stats.cash': 'Cash',
     'stats.paths': 'Paths',
     'stats.queues': 'Queues',
     'stats.rides': 'Rides',
@@ -692,6 +724,8 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.booting': 'Simulation booting',
     'status.language': 'Language: English',
     'status.speed': 'Simulation speed {speed}x',
+    'status.cashChanged': '{label}: {amount}',
+    'status.notEnoughCash': 'Not enough cash · need {cost}, have {cash}',
     'status.pathBuilt': 'Path built at {key}',
     'status.selectRideFirst': 'Select a ride first',
     'status.entranceAlready': 'Entrance already placed',
@@ -735,6 +769,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.zoom': 'Zoom {zoom}%',
     'status.viewRotated': 'View rotated {key}',
     'status.placementRotated': 'Placement rotation {degrees} degrees',
+    'status.treeScale': 'Fir tree scale {scale}%',
     'debug.boarded': '{ride} boarded guest ({riders}/{capacity})',
     'debug.boarding': '{ride} boarding guest',
     'debug.queueFullLeft': '{ride} queue full; guest left',
@@ -1198,6 +1233,8 @@ const setStatus = (message: string) => {
   statusText.textContent = message;
 };
 
+const formatMoney = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`;
+
 const debug = (message: string) => {
   const time = new Date().toLocaleTimeString('en-US', { hour12: false });
   debugLines.unshift(`[${time}] ${message}`);
@@ -1206,10 +1243,30 @@ const debug = (message: string) => {
 };
 
 const refreshStats = () => {
+  cashCount.textContent = formatMoney(parkCash);
   guestCount.textContent = String(guests.length);
   pathCount.textContent = String(paths.size);
   queueCount.textContent = String(queuePaths.size);
   rideCount.textContent = String(rides.size);
+};
+
+const chargeBuildCost = (cost: number, labelKey: string) => {
+  if (parkCash < cost) {
+    setStatus(t('status.notEnoughCash', { cost: formatMoney(cost), cash: formatMoney(parkCash) }));
+    return false;
+  }
+
+  parkCash -= cost;
+  refreshStats();
+  setStatus(t('status.cashChanged', { label: t(labelKey), amount: `-${formatMoney(cost)}` }));
+  return true;
+};
+
+const refundBuildCost = (amount: number, labelKey: string) => {
+  if (amount <= 0) return;
+  parkCash += amount;
+  refreshStats();
+  setStatus(t('status.cashChanged', { label: t(labelKey), amount: `+${formatMoney(amount)}` }));
 };
 
 const selectedGuest = () => (selectedGuestId === null ? undefined : guests.find((guest) => guest.id === selectedGuestId));
@@ -1522,6 +1579,18 @@ window.addEventListener('click', (event) => {
   closeBuildPopovers();
 });
 
+const syncTreeScaleControl = () => {
+  const value = Math.round(treePlacementScale * 100);
+  treeScaleInput.value = String(value);
+  treeScaleValue.textContent = `${value}%`;
+};
+
+treeScaleInput.addEventListener('input', () => {
+  treePlacementScale = clamp(Number(treeScaleInput.value) / 100, 0.55, 1.75);
+  syncTreeScaleControl();
+  updatePreview();
+});
+
 rideToolButtons.forEach((button) => {
   button.addEventListener('click', () => {
     const tool = button.dataset.rideTool as 'entrance' | 'exit';
@@ -1583,6 +1652,8 @@ const clearPreview = () => {
 const placementRotationY = (step = placementRotationStep) => step * quarterYawStep;
 
 const placementRotationDegrees = () => ((placementRotationStep % 4) + 4) % 4 * 90;
+
+const treeCollisionRadiusForScale = (scale: number) => treeCollisionRadius * scale;
 
 const footprintFor = (tool: Tool, coord: GridCoord) => {
   if (tool !== 'carousel') return [coord];
@@ -1650,9 +1721,9 @@ const treePlacementPosition = (coord: GridCoord) => {
   );
 };
 
-const canPlaceTreeAt = (coord: GridCoord, position = treePlacementPosition(coord)) => {
+const canPlaceTreeAt = (coord: GridCoord, position = treePlacementPosition(coord), scale = treePlacementScale) => {
   if (!canPlaceTree(coord)) return false;
-  return [...trees.values()].every((tree) => tree.position.distanceTo(position) >= treeCollisionRadius);
+  return [...trees.values()].every((tree) => tree.position.distanceTo(position) >= treeCollisionRadiusForScale(scale) + treeCollisionRadiusForScale(tree.scale) * 0.72);
 };
 
 const canPlaceCarousel = (coord: GridCoord) =>
@@ -1746,6 +1817,27 @@ const createCarouselPlacementPreview = (valid: boolean) => {
   return group;
 };
 
+const createTreePlacementPreview = (valid: boolean) => {
+  const group = new THREE.Group();
+  const trunkMaterial = valid ? treePreviewTrunkMaterial : blockedMaterial;
+  const canopyMaterial = valid ? treePreviewCanopyMaterial : blockedMaterial;
+
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.9, 8), trunkMaterial);
+  trunk.position.y = 0.45;
+  group.add(trunk);
+
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.78, 1.5, 8), canopyMaterial);
+  canopy.position.y = 1.4;
+  group.add(canopy);
+
+  const frontMarker = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 3), valid ? carouselPreviewAccentMaterial : blockedMaterial);
+  frontMarker.position.set(0, 0.08, 0.42);
+  frontMarker.rotation.x = Math.PI / 2;
+  group.add(frontMarker);
+
+  return group;
+};
+
 const updatePreview = () => {
   clearPreview();
   if (!hoveredTile) {
@@ -1768,9 +1860,13 @@ const updatePreview = () => {
 
   if (activeTool === 'tree') {
     const position = treePlacementPosition(hoveredTile);
-    selection.visible = true;
-    selection.material = canPlaceTreeAt(hoveredTile, position) ? selectionMaterial : blockedMaterial;
-    selection.position.set(position.x, heightAt(hoveredTile.x, hoveredTile.z) + 0.11, position.z);
+    const validTree = canPlaceTreeAt(hoveredTile, position);
+    const preview = createTreePlacementPreview(validTree);
+    preview.position.copy(position);
+    preview.rotation.y = placementRotationY();
+    preview.scale.setScalar(treePlacementScale);
+    placementPreview.add(preview);
+    selection.visible = false;
     return;
   }
 
@@ -1817,6 +1913,7 @@ const resetDragActions = () => {
 
 const addPath = (coord: GridCoord, silent = false) => {
   if (!canPlacePath(coord)) return false;
+  if (!silent && !chargeBuildCost(gameConfig.economy.buildCosts.path, 'tool.path')) return false;
 
   const key = keyOf(coord.x, coord.z);
   const path = new THREE.Mesh(pathGeometry, pathMaterial);
@@ -2124,6 +2221,7 @@ const connectQueueEntryFromPath = (pathKey: string) => {
 
 const addQueuePath = (coord: GridCoord, silent = false) => {
   if (!canPlaceQueue(coord)) return false;
+  if (!silent && !chargeBuildCost(gameConfig.economy.buildCosts.queuePath, 'tool.queue')) return false;
 
   const key = keyOf(coord.x, coord.z);
   const queuePath = createQueuePath();
@@ -2216,6 +2314,8 @@ const createGate = (kind: 'entrance' | 'exit') => {
 const addRideGate = (coord: GridCoord, kind: 'entrance' | 'exit', silent = false) => {
   const ride = selectedRide();
   if (!ride || !canPlaceRideGate(coord, kind)) return false;
+  const cost = kind === 'entrance' ? gameConfig.economy.buildCosts.rideEntrance : gameConfig.economy.buildCosts.rideExit;
+  if (!silent && !chargeBuildCost(cost, `ride.${kind}`)) return false;
 
   const key = keyOf(coord.x, coord.z);
   const gate = createGate(kind);
@@ -2271,18 +2371,23 @@ const createTree = (position: THREE.Vector3) => {
   return group;
 };
 
-const addTree = (coord: GridCoord, silent = false) => {
+const addTree = (coord: GridCoord, silent = false, rotationStep = placementRotationStep) => {
   const position = treePlacementPosition(coord);
-  if (!canPlaceTreeAt(coord, position)) return false;
+  const scale = treePlacementScale;
+  if (!canPlaceTreeAt(coord, position, scale)) return false;
+  const cost = gameConfig.economy.buildCosts.firTree * scale;
+  if (!silent && !chargeBuildCost(cost, 'tool.tree')) return false;
 
   const key = keyOf(coord.x, coord.z);
   const treeId = `tree-${++treeSerial}`;
   const tree = createTree(position);
+  tree.rotation.y = placementRotationY(rotationStep);
+  tree.scale.setScalar(scale);
   tree.traverse((child) => {
     child.userData.treeKey = treeId;
   });
   buildGroup.add(tree);
-  trees.set(treeId, { group: tree, coord, position: position.clone() });
+  trees.set(treeId, { group: tree, coord, position: position.clone(), rotationStep, scale });
   if (!silent) setStatus(t('status.treePlanted', { key }));
   return true;
 };
@@ -2299,6 +2404,7 @@ const removeTree = (treeKey: string) => {
 
   buildGroup.remove(tree.group);
   trees.delete(treeKey);
+  refundBuildCost(gameConfig.economy.buildCosts.firTree * tree.scale * gameConfig.economy.refundRates.firTree, 'tool.tree');
   setStatus(t('status.treeRemoved', { key: keyOf(tree.coord.x, tree.coord.z) }));
   return 'tree' as const;
 };
@@ -2530,6 +2636,7 @@ const createCarousel = () => {
 
 const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementRotationStep) => {
   if (!canPlaceCarousel(coord)) return false;
+  if (!silent && !chargeBuildCost(gameConfig.economy.buildCosts.carousel, 'tool.carousel')) return false;
 
   const id = `carousel-${rideSerial}`;
   rideSerial += 1;
@@ -2577,6 +2684,7 @@ const removeRideById = (rideId: string) => {
 
   stopRideMusic(ride);
   buildGroup.remove(ride.group);
+  let refund = gameConfig.economy.buildCosts.carousel * gameConfig.economy.refundRates.carousel;
   if (ride.entranceKey) {
     const entrance = entrances.get(ride.entranceKey);
     if (entrance) buildGroup.remove(entrance.mesh);
@@ -2584,17 +2692,20 @@ const removeRideById = (rideId: string) => {
       if (queuePath.nextKey === ride.entranceKey) queuePath.nextKey = undefined;
     });
     entrances.delete(ride.entranceKey);
+    refund += gameConfig.economy.buildCosts.rideEntrance * gameConfig.economy.refundRates.rideEntrance;
   }
   if (ride.exitKey) {
     const exit = exits.get(ride.exitKey);
     if (exit) buildGroup.remove(exit.mesh);
     exits.delete(ride.exitKey);
+    refund += gameConfig.economy.buildCosts.rideExit * gameConfig.economy.refundRates.rideExit;
   }
   ride.footprint.forEach((cellKey) => occupied.delete(cellKey));
   rides.delete(rideId);
   if (selectedRideId === rideId) selectedRideId = null;
   refreshStats();
   updateSelectedRidePanel();
+  refundBuildCost(refund, 'tool.carousel');
   setStatus(t('status.rideRemoved'));
   return 'ride' as const;
 };
@@ -2616,6 +2727,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
+    refundBuildCost(gameConfig.economy.buildCosts.path * gameConfig.economy.refundRates.path, 'tool.path');
     setStatus(t('status.pathRemoved', { key }));
     return 'path';
   }
@@ -2632,6 +2744,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     resetInvalidGuests();
     refreshStats();
     updateSelectedRidePanel();
+    refundBuildCost(gameConfig.economy.buildCosts.queuePath * gameConfig.economy.refundRates.queuePath, 'tool.queue');
     setStatus(t('status.queueRemoved', { key }));
     return 'queue';
   }
@@ -2648,6 +2761,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     refreshQueueVisualsAround(coord);
     resetInvalidGuests();
     updateSelectedRidePanel();
+    refundBuildCost(gameConfig.economy.buildCosts.rideEntrance * gameConfig.economy.refundRates.rideEntrance, 'ride.entrance');
     setStatus(t('status.entranceRemoved'));
     return 'entrance';
   }
@@ -2659,6 +2773,7 @@ const removeAt = (coord: GridCoord, allowedTarget?: BulldozeTarget) => {
     buildGroup.remove(exit.mesh);
     exits.delete(key);
     updateSelectedRidePanel();
+    refundBuildCost(gameConfig.economy.buildCosts.rideExit * gameConfig.economy.refundRates.rideExit, 'ride.exit');
     setStatus(t('status.exitRemoved'));
     return 'exit';
   }
@@ -4313,12 +4428,26 @@ window.addEventListener('keydown', (event) => {
   if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
 
   if (event.code !== 'KeyR' && event.key.toLowerCase() !== 'r') return;
-  if (activeTool !== 'carousel') return;
+  if (activeTool !== 'carousel' && activeTool !== 'tree') return;
   event.preventDefault();
   if (event.repeat) return;
 
   placementRotationStep = (placementRotationStep + 1) % 4;
   setStatus(t('status.placementRotated', { degrees: placementRotationDegrees() }));
+  updatePreview();
+});
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+  if (activeTool !== 'tree') return;
+  if (event.key !== '[' && event.key !== ']') return;
+  event.preventDefault();
+  if (event.repeat) return;
+
+  treePlacementScale = clamp(treePlacementScale + (event.key === ']' ? 0.12 : -0.12), 0.55, 1.75);
+  syncTreeScaleControl();
+  setStatus(t('status.treeScale', { scale: Math.round(treePlacementScale * 100) }));
   updatePreview();
 });
 
@@ -4362,6 +4491,7 @@ window.addEventListener('resize', setViewport);
 updateCameraAngle();
 setViewport();
 applyStaticTranslations();
+syncTreeScaleControl();
 seedPark();
 setTool('select');
 updateSelectedRidePanel();
