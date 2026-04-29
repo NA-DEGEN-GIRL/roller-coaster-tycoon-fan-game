@@ -197,8 +197,6 @@ const rideBoundaryLongGeometry = new THREE.BoxGeometry(tileSize * 3.02, 0.16, 0.
 const rideBoundaryShortGeometry = new THREE.BoxGeometry(0.12, 0.16, tileSize * 3.02);
 const queueFenceGeometry = new THREE.BoxGeometry(0.08, 0.32, tileSize * 0.76);
 const queueFenceCrossGeometry = new THREE.BoxGeometry(tileSize * 0.76, 0.32, 0.08);
-const queueEntryConnectorGeometry = new THREE.BoxGeometry(0.24, 0.06, tileSize * 0.82);
-const queueEntryPostGeometry = new THREE.BoxGeometry(0.16, 0.2, 0.16);
 const queueArrowShape = new THREE.Shape();
 queueArrowShape.moveTo(0, -0.42);
 queueArrowShape.lineTo(-0.24, 0.08);
@@ -333,6 +331,13 @@ const queueEntryPathKeys = (key: string) => {
   const queuePath = queuePaths.get(key);
   if (!queuePath?.entryPathKey || !paths.has(queuePath.entryPathKey)) return [];
   return adjacentKeys(parseKey(key)).includes(queuePath.entryPathKey) ? [queuePath.entryPathKey] : [];
+};
+
+const previewQueueEntryPathKey = (key: string) => {
+  if (activeTool !== 'queue' || !hoveredTile) return null;
+  const pathKey = keyOf(hoveredTile.x, hoveredTile.z);
+  if (queueEntryTargetForPath(pathKey) !== key) return null;
+  return pathKey;
 };
 
 const rideConnectionStatus = (ride: Ride) => {
@@ -645,22 +650,11 @@ const createQueueFence = (edge: QueueEdge) => {
 const createQueueEntryPreview = () => {
   const group = new THREE.Group();
 
-  const connector = new THREE.Mesh(queueEntryConnectorGeometry, queueEntryMaterial);
-  connector.position.y = 0.14;
-  connector.receiveShadow = true;
-  group.add(connector);
-
   const arrow = new THREE.Mesh(queueArrowGeometry, queueEntryMaterial);
   arrow.position.y = 0.18;
-  arrow.scale.setScalar(0.58);
+  arrow.scale.setScalar(0.72);
   arrow.rotation.x = -Math.PI / 2;
   group.add(arrow);
-
-  const leftPost = new THREE.Mesh(queueEntryPostGeometry, queueEntryMaterial);
-  const rightPost = new THREE.Mesh(queueEntryPostGeometry, queueEntryMaterial);
-  leftPost.position.set(-0.26, 0.23, -tileSize * 0.36);
-  rightPost.position.set(0.26, 0.23, -tileSize * 0.36);
-  group.add(leftPost, rightPost);
 
   group.visible = false;
   return group;
@@ -731,7 +725,8 @@ const refreshQueueVisualAt = (key: string) => {
   if (nextEdge) openEdges.add(nextEdge);
 
   const incomingKeys = incomingQueueKeys(key);
-  const entryPathKeys = incomingKeys.length === 0 ? queueEntryPathKeys(key) : [];
+  const previewEntryPathKey = incomingKeys.length === 0 ? previewQueueEntryPathKey(key) : null;
+  const entryPathKeys = incomingKeys.length === 0 ? [previewEntryPathKey, ...queueEntryPathKeys(key)].filter((pathKey): pathKey is string => Boolean(pathKey)) : [];
 
   incomingKeys.forEach((neighborKey) => {
     const neighborCoord = parseKey(neighborKey);
@@ -748,7 +743,6 @@ const refreshQueueVisualAt = (key: string) => {
     queuePath.entryPreview.visible = true;
     queuePath.entryPreview.position.set(vector.x * tileSize * 0.44, 0, vector.z * tileSize * 0.44);
     queuePath.entryPreview.rotation.y = rotationYForQueueDirection(oppositeQueueDirection[edge]);
-    queuePath.entryGhost.visible = true;
   });
 
   if (incomingKeys.length === 0 && entryPathKeys.length === 0 && nextEdge) openEdges.add(oppositeQueueDirection[nextEdge]);
@@ -763,23 +757,32 @@ const refreshQueueVisualsAround = (coord: GridCoord) => {
 };
 
 const updateQueueEntryPreviews = () => {
+  queuePaths.forEach((queuePath) => {
+    queuePath.entryGhost.visible = false;
+  });
+  if (activeTool !== 'queue' || !hoveredTile) return;
+
+  const pathKey = keyOf(hoveredTile.x, hoveredTile.z);
+  const queueKey = queueEntryTargetForPath(pathKey);
+  if (!queueKey) return;
+
+  const queuePath = queuePaths.get(queueKey);
+  if (!queuePath || queuePath.entryPathKey === pathKey) return;
+
+  const edge = directionBetweenKeys(queueKey, pathKey);
+  if (!edge) return;
+
   const elapsed = performance.now() * 0.001;
-  queuePaths.forEach((queuePath, key) => {
-    if (!queuePath.entryPathKey || !queuePath.entryGhost.visible) return;
-
-    const edge = directionBetweenKeys(key, queuePath.entryPathKey);
-    if (!edge) return;
-
-    const vector = queueDirectionVectors[edge];
-    queuePath.entryGhost.rotation.y = rotationYForQueueDirection(oppositeQueueDirection[edge]);
-    queuePath.entryGhost.children.forEach((ghost, index) => {
-      const phaseOffset = Number(ghost.userData.phaseOffset ?? 0);
-      const progress = (elapsed / 1.7 + phaseOffset) % 1;
-      const distance = tileSize * (0.72 - progress * 1.08);
-      ghost.position.set(vector.x * distance, 0, vector.z * distance);
-      queuePath.entryGhostMaterials[index].opacity = 0.08 + Math.sin(progress * Math.PI) * 0.24;
-      ghost.scale.setScalar(0.82 + progress * 0.18);
-    });
+  const vector = queueDirectionVectors[edge];
+  queuePath.entryGhost.visible = true;
+  queuePath.entryGhost.rotation.y = 0;
+  queuePath.entryGhost.children.forEach((ghost, index) => {
+    const phaseOffset = Number(ghost.userData.phaseOffset ?? 0);
+    const progress = (elapsed / 1.45 + phaseOffset) % 1;
+    const distance = tileSize * (0.56 - progress * 0.44);
+    ghost.position.set(vector.x * distance, 0, vector.z * distance);
+    queuePath.entryGhostMaterials[index].opacity = 0.04 + progress * 0.3;
+    ghost.scale.setScalar(0.78 + progress * 0.16);
   });
 };
 
