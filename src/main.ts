@@ -13,7 +13,7 @@ type QueueDirection = 'north' | 'east' | 'south' | 'west';
 type QueueEdge = QueueDirection;
 type BulldozeTarget = 'path' | 'queue' | 'entrance' | 'exit' | 'tree' | 'bench' | 'ride';
 type Language = 'ko' | 'en';
-type GuestIntent = 'wander' | 'ride' | 'leaving';
+type GuestIntent = 'wander' | 'ride' | 'rest' | 'leaving';
 type TreeKind = 'fir' | 'cherry';
 
 type QueuePath = {
@@ -44,7 +44,7 @@ type Guest = {
   progress: number;
   speed: number;
   pause: number;
-  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'seeking' | 'leaving';
+  state: 'walking' | 'queueing' | 'waiting' | 'boarding' | 'riding' | 'exiting' | 'sitting' | 'seeking' | 'leaving';
   money: number;
   hunger: number;
   tiredness: number;
@@ -63,6 +63,7 @@ type Guest = {
   thoughtRideId?: string;
   targetPathKey?: string;
   targetRideId?: string;
+  targetBenchKey?: string;
   rejectionCooldown?: number;
   rideId?: string;
   queueKey?: string;
@@ -75,6 +76,7 @@ type Guest = {
   boardingTarget?: THREE.Vector3;
   wanderTarget?: THREE.Vector3;
   seekTimer?: number;
+  sitTimer?: number;
   rideTime: number;
 };
 
@@ -168,6 +170,7 @@ type BenchInstance = {
   group: THREE.Group;
   coord: GridCoord;
   edge: QueueEdge;
+  occupantId?: number;
 };
 
 type PickedBuildObject =
@@ -624,6 +627,7 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.boarding': '놀이기구에 탑승 중',
     'guest.riding': '놀이기구 탑승 중',
     'guest.exiting': '놀이기구에서 나오는 중',
+    'guest.sitting': '벤치에서 쉬는 중',
     'guest.seeking': '길을 찾는 중',
     'guest.leaving': '공원 밖으로 나가는 중',
     'guest.thoughtWander': '공원을 둘러보는 중',
@@ -638,6 +642,8 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.thoughtBoarding': '{ride}에 탑승하는 중',
     'guest.thoughtRiding': '{ride} 탑승 중',
     'guest.thoughtExiting': '{ride}에서 나오는 중',
+    'guest.thoughtRest': '쉴 벤치를 찾는 중',
+    'guest.thoughtSitting': '벤치에서 쉬는 중',
     'pause.pause': '일시정지',
     'pause.resume': '재개',
     'debug.noRide': '손님 {guests}명 · 선택한 놀이기구 없음',
@@ -710,6 +716,7 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.rideRejectedPrice': '{guest} {ride} 거절 · 가격/가치 점수 {score}',
     'debug.rideRejectedQueue': '{guest} {ride} 거절 · 줄 가득 참',
     'debug.rideTicketPaid': '{guest} {ride} 탑승료 {price} 지불',
+    'debug.benchSit': '{guest} 벤치에서 휴식',
     'debug.routeFailed': '{guest} 목적지 경로 실패',
     'debug.phase': '{ride} {phase}',
     'debug.unloaded': '{ride} 탑승객 하차 완료',
@@ -823,6 +830,7 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.boarding': 'Boarding a ride',
     'guest.riding': 'On a ride',
     'guest.exiting': 'Leaving a ride',
+    'guest.sitting': 'Resting on a bench',
     'guest.seeking': 'Looking for a path',
     'guest.leaving': 'Leaving the park',
     'guest.thoughtWander': 'Browsing the park',
@@ -837,6 +845,8 @@ const translations: Record<Language, Record<string, string>> = {
     'guest.thoughtBoarding': 'Boarding {ride}',
     'guest.thoughtRiding': 'Riding {ride}',
     'guest.thoughtExiting': 'Leaving {ride}',
+    'guest.thoughtRest': 'Looking for a bench',
+    'guest.thoughtSitting': 'Resting on a bench',
     'pause.pause': 'Pause',
     'pause.resume': 'Resume',
     'debug.noRide': 'Guests {guests} · no ride selected',
@@ -909,6 +919,7 @@ const translations: Record<Language, Record<string, string>> = {
     'debug.rideRejectedPrice': '{guest} rejected {ride} · value score {score}',
     'debug.rideRejectedQueue': '{guest} rejected {ride} · queue full',
     'debug.rideTicketPaid': '{guest} paid {ride} ticket {price}',
+    'debug.benchSit': '{guest} sat on a bench',
     'debug.routeFailed': '{guest} route failed',
     'debug.phase': '{ride} {phase}',
     'debug.unloaded': '{ride} unloaded riders',
@@ -1435,6 +1446,7 @@ const formatGuestStatus = (guest: Guest) => {
   if (guest.state === 'boarding') return t('guest.boarding');
   if (guest.state === 'riding') return t('guest.riding');
   if (guest.state === 'exiting') return t('guest.exiting');
+  if (guest.state === 'sitting') return t('guest.sitting');
   if (guest.state === 'leaving') return t('guest.leaving');
   return t('guest.seeking');
 };
@@ -1943,6 +1955,15 @@ const benchPositionForEdge = (coord: GridCoord, edge: QueueEdge) => {
   const vector = queueDirectionVectors[edge];
   position.x += vector.x * offset;
   position.z += vector.z * offset;
+  return position;
+};
+
+const benchSeatPosition = (bench: BenchInstance) => {
+  const position = benchPositionForEdge(bench.coord, bench.edge);
+  const vector = queueDirectionVectors[bench.edge];
+  position.x -= vector.x * tileSize * 0.04;
+  position.z -= vector.z * tileSize * 0.04;
+  position.y = 0.18;
   return position;
 };
 
@@ -2799,6 +2820,12 @@ const removeBench = (benchKey: string) => {
   const bench = benches.get(benchKey);
   if (!bench) return null;
 
+  guests.forEach((guest) => {
+    if (guest.targetBenchKey !== benchKey) return;
+    const wasSitting = guest.state === 'sitting';
+    releaseBenchForGuest(guest);
+    if (wasSitting) sendGuestSeekingPath(guest);
+  });
   buildGroup.remove(bench.group);
   benches.delete(benchKey);
   refundBuildCost(gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench, 'tool.bench');
@@ -2809,6 +2836,12 @@ const removeBench = (benchKey: string) => {
 const removeBenchesOnPath = (pathKey: string) => {
   benchesInTile(pathKey).forEach((bench) => {
     const key = benchKeyFor(bench.coord, bench.edge);
+    guests.forEach((guest) => {
+      if (guest.targetBenchKey !== key) return;
+      const wasSitting = guest.state === 'sitting';
+      releaseBenchForGuest(guest);
+      if (wasSitting) sendGuestSeekingPath(guest);
+    });
     buildGroup.remove(bench.group);
     benches.delete(key);
     refundBuildCost(gameConfig.economy.buildCosts.bench * gameConfig.economy.refundRates.bench, 'tool.bench');
@@ -3379,6 +3412,74 @@ const setGuestThought = (guest: Guest, key: string, replacements: Record<string,
   guest.thought = t(key, replacements);
 };
 
+const benchPathKey = (bench: BenchInstance) => keyOf(bench.coord.x, bench.coord.z);
+
+const isBenchAvailable = (benchKey: string, guest?: Guest) => {
+  const bench = benches.get(benchKey);
+  if (!bench || !paths.has(benchPathKey(bench))) return false;
+  if (bench.occupantId !== undefined && bench.occupantId !== guest?.id) return false;
+
+  const reservedByOtherGuest = guests.some(
+    (other) =>
+      other.id !== guest?.id &&
+      other.targetBenchKey === benchKey &&
+      other.intent === 'rest' &&
+      other.state !== 'seeking' &&
+      other.state !== 'leaving',
+  );
+  return !reservedByOtherGuest;
+};
+
+const findBestBenchForGuest = (guest: Guest) => {
+  const startKey = paths.has(guest.from) ? guest.from : paths.has(guest.to) ? guest.to : nearestPathKeyFromPosition(guest.mesh.position);
+  if (!startKey) return null;
+
+  return [...benches.entries()]
+    .filter(([benchKey]) => isBenchAvailable(benchKey, guest))
+    .map(([benchKey, bench]) => {
+      const route = findPathRoute(startKey, benchPathKey(bench));
+      return route ? { benchKey, routeLength: route.length } : null;
+    })
+    .filter((candidate): candidate is { benchKey: string; routeLength: number } => Boolean(candidate))
+    .sort((a, b) => a.routeLength - b.routeLength)[0]?.benchKey ?? null;
+};
+
+const sendGuestToBench = (guest: Guest, benchKey: string) => {
+  const bench = benches.get(benchKey);
+  if (!bench || !isBenchAvailable(benchKey, guest)) return false;
+  const sent = sendGuestAlongPath(guest, benchPathKey(bench), 'rest', 'guest.thoughtRest');
+  if (sent) guest.targetBenchKey = benchKey;
+  return sent;
+};
+
+const startGuestSitting = (guest: Guest, benchKey: string) => {
+  const bench = benches.get(benchKey);
+  if (!bench || !isBenchAvailable(benchKey, guest)) return false;
+
+  bench.occupantId = guest.id;
+  guest.state = 'sitting';
+  guest.intent = 'rest';
+  guest.targetBenchKey = benchKey;
+  guest.targetPathKey = benchPathKey(bench);
+  guest.targetRideId = undefined;
+  guest.rideId = undefined;
+  guest.pathRoute = undefined;
+  guest.pathRouteIndex = undefined;
+  guest.queueRoute = undefined;
+  guest.queueRouteIndex = undefined;
+  guest.queueMoveStart = undefined;
+  guest.boardingTarget = undefined;
+  guest.progress = 0;
+  guest.pause = 0;
+  guest.sitTimer = 7 + Math.random() * 7;
+  guest.mesh.visible = true;
+  guest.mesh.position.copy(benchSeatPosition(bench));
+  guest.mesh.rotation.y = benchRotationForEdge(bench.edge);
+  setGuestThought(guest, 'guest.thoughtSitting');
+  debug(t('debug.benchSit', { guest: guestLabel(guest) }));
+  return true;
+};
+
 const rideEntryPathForGuest = (ride: Ride) => {
   const tail = queueTailKeysForRide(ride).find((key) => queueEntryPathKeys(key).length > 0);
   return tail ? queueEntryPathKeys(tail)[0] : undefined;
@@ -3487,6 +3588,11 @@ const chooseNextGuestDestination = (guest: Guest) => {
   if (guest.happiness <= decision.minimumHappinessToStay || guest.money <= decision.lowCashExitThreshold) {
     if (!sendGuestLeavingPark(guest)) sendGuestWandering(guest);
     return;
+  }
+
+  if (guest.tiredness >= 62) {
+    const benchKey = findBestBenchForGuest(guest);
+    if (benchKey && sendGuestToBench(guest, benchKey)) return;
   }
 
   const bestRide = findBestRideForGuest(guest);
@@ -4036,7 +4142,16 @@ const placeGuestInQueueSlot = (guest: Guest, ride: Ride, key: string, slotIndex:
   guest.mesh.position.copy(queueSlotPosition(ride, key, slotIndex));
 };
 
+const releaseBenchForGuest = (guest: Guest) => {
+  if (!guest.targetBenchKey) return;
+  const bench = benches.get(guest.targetBenchKey);
+  if (bench?.occupantId === guest.id) bench.occupantId = undefined;
+  guest.targetBenchKey = undefined;
+  guest.sitTimer = undefined;
+};
+
 const clearGuestQueueState = (guest: Guest) => {
+  releaseBenchForGuest(guest);
   guest.rideId = undefined;
   guest.queueKey = undefined;
   guest.queueSlotIndex = undefined;
@@ -4046,7 +4161,9 @@ const clearGuestQueueState = (guest: Guest) => {
   guest.pathRouteIndex = undefined;
   guest.targetPathKey = undefined;
   guest.targetRideId = undefined;
+  guest.targetBenchKey = undefined;
   guest.boardingTarget = undefined;
+  guest.sitTimer = undefined;
   guest.rideTime = 0;
 };
 
@@ -4072,6 +4189,7 @@ const sendGuestSeekingPath = (guest: Guest) => {
 };
 
 const removeGuest = (guest: Guest) => {
+  releaseBenchForGuest(guest);
   const index = guests.indexOf(guest);
   if (index !== -1) guests.splice(index, 1);
   guestGroup.remove(guest.mesh);
@@ -4250,6 +4368,14 @@ const updateGuestNeeds = (guest: Guest, delta: number) => {
     }
   }
 
+  if (guest.state === 'sitting') {
+    guest.hunger = clamp(guest.hunger + delta * 0.22, 0, 100);
+    guest.tiredness = clamp(guest.tiredness - delta * 4.2, 0, 100);
+    guest.nausea = clamp(guest.nausea - delta * 0.8, 0, 100);
+    guest.happiness = clamp(guest.happiness + delta * 0.55, 0, 100);
+    return;
+  }
+
   const queueStress = guest.state === 'queueing' || guest.state === 'waiting' ? 1.35 : 1;
   const seekingStress = guest.state === 'seeking' ? 1.8 : 1;
   guest.hunger = clamp(guest.hunger + delta * 0.32, 0, 100);
@@ -4290,6 +4416,37 @@ const updateGuests = (delta: number) => {
 
     if (guest.state === 'riding') {
       if (!guest.rideId || !rides.has(guest.rideId)) finishRide(guest);
+      return;
+    }
+
+    if (guest.state === 'sitting') {
+      if (parkEntrance && !parkEntrance.isOpen) {
+        sendGuestLeavingPark(guest);
+        return;
+      }
+
+      const bench = guest.targetBenchKey ? benches.get(guest.targetBenchKey) : undefined;
+      if (!bench || bench.occupantId !== guest.id || !paths.has(benchPathKey(bench))) {
+        releaseBenchForGuest(guest);
+        sendGuestSeekingPath(guest);
+        return;
+      }
+
+      guest.mesh.position.copy(benchSeatPosition(bench));
+      guest.mesh.rotation.y = benchRotationForEdge(bench.edge);
+      guest.sitTimer = Math.max(0, (guest.sitTimer ?? 0) - delta);
+      if (guest.sitTimer > 0 && guest.tiredness > 30) return;
+
+      const pathKey = benchPathKey(bench);
+      releaseBenchForGuest(guest);
+      guest.state = 'walking';
+      guest.intent = 'wander';
+      guest.from = pathKey;
+      guest.to = pathKey;
+      guest.progress = 0;
+      guest.pause = 0;
+      placeGuestAt(guest, pathKey);
+      chooseNextGuestDestination(guest);
       return;
     }
 
@@ -4447,7 +4604,7 @@ const updateGuests = (delta: number) => {
       return;
     }
 
-    if (tryEnterQueueFromPath(guest, guest.from)) return;
+    if (guest.intent !== 'rest' && tryEnterQueueFromPath(guest, guest.from)) return;
 
     if (guest.state !== 'exiting' && guest.from !== parkEntrance?.outsideKey && (!isWalkway(guest.from) || !isWalkway(guest.to))) {
       sendGuestSeekingPath(guest);
@@ -4480,15 +4637,18 @@ const updateGuests = (delta: number) => {
         return;
       }
 
-      if (tryEnterQueueFromPath(guest, guest.from)) return;
+      if (guest.intent !== 'rest' && tryEnterQueueFromPath(guest, guest.from)) return;
 
       if (guest.pathRoute && guest.pathRoute.length > 0) {
         const routeIndex = guest.pathRouteIndex ?? 0;
         const nextIndex = routeIndex + 1;
         if (nextIndex >= guest.pathRoute.length - 1) {
+          if (guest.intent === 'rest' && guest.targetBenchKey && startGuestSitting(guest, guest.targetBenchKey)) return;
+
           guest.pathRoute = undefined;
           guest.pathRouteIndex = undefined;
           guest.targetPathKey = undefined;
+          if (guest.intent === 'rest') guest.targetBenchKey = undefined;
           chooseNextGuestDestination(guest);
           return;
         }
@@ -4502,7 +4662,13 @@ const updateGuests = (delta: number) => {
               guest,
               guest.targetPathKey,
               guest.intent,
-              targetRide ? 'guest.thoughtRide' : guest.intent === 'leaving' ? 'guest.thoughtLeaving' : 'guest.thoughtWander',
+              targetRide
+                ? 'guest.thoughtRide'
+                : guest.intent === 'leaving'
+                  ? 'guest.thoughtLeaving'
+                  : guest.intent === 'rest'
+                    ? 'guest.thoughtRest'
+                    : 'guest.thoughtWander',
               targetRide ? { ride: rideLabel(targetRide) } : {},
               guest.targetRideId,
             )
@@ -4967,6 +5133,19 @@ rideMusicPresetSelect.addEventListener('change', () => {
 });
 window.addEventListener('pointerdown', resumeAudioContext);
 window.addEventListener('keydown', resumeAudioContext);
+window.addEventListener('keydown', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+  if (event.key !== 'Escape') return;
+
+  const hasOpenBuildPopover = buildPopovers.some((popover) => !popover.hidden);
+  if (activeTool === 'select' && !hasOpenBuildPopover) return;
+
+  event.preventDefault();
+  closeBuildPopovers();
+  setTool('select');
+  updatePreview();
+});
 guestFollowButton.addEventListener('click', () => {
   const guest = selectedGuest();
   if (!guest) return;
