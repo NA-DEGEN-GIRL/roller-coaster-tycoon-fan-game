@@ -81,6 +81,8 @@ type CrowdAudioState = {
   effects: {
     audio: HTMLAudioElement;
     nextTime: number;
+    tag: 'ambient' | 'laughter' | 'rideReaction' | 'rare';
+    priority: number;
     minCrowd: number;
     stopAfter: number;
     minDelay: number;
@@ -107,6 +109,7 @@ type Ride = {
   occupiedSeatIndexes: Set<number>;
   footprint: string[];
   center: GridCoord;
+  rotationStep: number;
   isOpen: boolean;
   musicEnabled: boolean;
   musicPreset: CarouselMusicPreset;
@@ -256,6 +259,21 @@ const rideFoundationMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c9b1,
 const rideBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4f6f8f, roughness: 0.62 });
 const carouselCanopyRedMaterial = new THREE.MeshStandardMaterial({ color: 0xde5b42, roughness: 0.5, side: THREE.DoubleSide });
 const carouselCanopyCreamMaterial = new THREE.MeshStandardMaterial({ color: 0xfff1cf, roughness: 0.54, side: THREE.DoubleSide });
+const carouselPreviewValidMaterial = new THREE.MeshStandardMaterial({
+  color: 0x79d3ff,
+  roughness: 0.5,
+  transparent: true,
+  opacity: 0.42,
+  depthWrite: false,
+});
+const carouselPreviewAccentMaterial = new THREE.MeshStandardMaterial({
+  color: 0xf4d35e,
+  roughness: 0.45,
+  transparent: true,
+  opacity: 0.58,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
 const openMaterial = new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.45, emissive: 0x0b3a1c });
 const closedMaterial = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.45, emissive: 0x3a0a0a });
 const blockedMaterial = new THREE.MeshStandardMaterial({
@@ -331,6 +349,7 @@ let lastDraggedBuildKey: string | null = null;
 let lastDraggedBulldozeKey: string | null = null;
 let lastQueueBuildKey: string | null = null;
 let bulldozeDragTarget: BulldozeTarget | null = null;
+let placementRotationStep = 0;
 let lastDragX = 0;
 let lastDragY = 0;
 let followSelectedGuest = false;
@@ -366,7 +385,7 @@ const audioTestZones: AudioTestZone[] = [
   { center: { x: -8, z: -8 }, amount: 1.4, radius: tileSize * 3.2, dummyGuests: 4, color: 0x68c7d9, labelKo: '군중 낮음', labelEn: 'Low Crowd' },
   { center: { x: -8, z: 8 }, amount: 3.2, radius: tileSize * 3.2, dummyGuests: 9, color: 0xf2c94c, labelKo: '군중 중간', labelEn: 'Mid Crowd' },
   { center: { x: 0, z: 8 }, amount: 6.5, radius: tileSize * 3.6, dummyGuests: 18, color: 0xeb5757, labelKo: '군중 높음', labelEn: 'High Crowd' },
-  { center: { x: 8, z: 8 }, amount: 4.8, radius: tileSize * 3.4, dummyGuests: 12, color: 0xbb6bd9, labelKo: '리액션 테스트', labelEn: 'Reaction Test' },
+  { center: { x: 8, z: 8 }, amount: 7.5, radius: tileSize * 4.2, dummyGuests: 12, color: 0xbb6bd9, labelKo: '리액션 테스트', labelEn: 'Reaction Test' },
 ];
 
 const translations: Record<Language, Record<string, string>> = {
@@ -402,7 +421,7 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.select': '선택 도구 선택됨',
     'toolStatus.path': '길 도구 선택됨',
     'toolStatus.queue': '대기줄 길 도구 선택됨',
-    'toolStatus.carousel': '회전목마 프리팹 선택됨',
+    'toolStatus.carousel': '회전목마 프리팹 선택됨 · R로 90도 회전',
     'toolStatus.tree': '나무 도구 선택됨',
     'toolStatus.bulldoze': '철거 도구 선택됨',
     'toolStatus.entrance': '입구 도구 선택됨',
@@ -496,6 +515,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.paused': '시뮬레이션 일시정지',
     'status.zoom': '확대 {zoom}%',
     'status.viewRotated': '{key} 방향으로 화면 회전',
+    'status.placementRotated': '설치 방향 {degrees}도',
     'debug.boarded': '{ride} 손님 탑승 완료 ({riders}/{capacity})',
     'debug.boarding': '{ride} 손님 탑승 중',
     'debug.queueFullLeft': '{ride} 대기줄 가득 참; 손님 이탈',
@@ -543,7 +563,7 @@ const translations: Record<Language, Record<string, string>> = {
     'toolStatus.select': 'Select tool selected',
     'toolStatus.path': 'Path tool selected',
     'toolStatus.queue': 'Queue path tool selected',
-    'toolStatus.carousel': 'Carousel prefab selected',
+    'toolStatus.carousel': 'Carousel prefab selected · press R to rotate 90 degrees',
     'toolStatus.tree': 'Tree tool selected',
     'toolStatus.bulldoze': 'Bulldoze tool selected',
     'toolStatus.entrance': 'Entrance tool selected',
@@ -637,6 +657,7 @@ const translations: Record<Language, Record<string, string>> = {
     'status.paused': 'Simulation paused',
     'status.zoom': 'Zoom {zoom}%',
     'status.viewRotated': 'View rotated {key}',
+    'status.placementRotated': 'Placement rotation {degrees} degrees',
     'debug.boarded': '{ride} boarded guest ({riders}/{capacity})',
     'debug.boarding': '{ride} boarding guest',
     'debug.queueFullLeft': '{ride} queue full; guest left',
@@ -935,7 +956,7 @@ const createCrowdAudio = () => {
 
   const crowdLayerSources = [
     { src: '/audio/crowd/festival-crowd-walla.ogg', volume: 0.78, rate: 1, minDensity: 0.2, exponent: 0.66 },
-    { src: '/audio/candidates/high-school-cafeteria.ogg', volume: 0.22, rate: 0.985, minDensity: 1.35, exponent: 1.05 },
+    { src: '/audio/crowd/high-school-cafeteria.ogg', volume: 0.22, rate: 0.985, minDensity: 1.35, exponent: 1.05 },
     { src: '/audio/crowd/mall-less-crowded.ogg', volume: 0.22, rate: 0.97, minDensity: 0.75, exponent: 0.84 },
     { src: '/audio/crowd/mall-alexa-bed.ogg', volume: 0.15, rate: 1.01, minDensity: 2.35, exponent: 1.28 },
   ];
@@ -961,12 +982,12 @@ const createCrowdAudio = () => {
   });
 
   const effects = [
-    { src: '/audio/crowd/baby-cry-2s-cc0.ogg', volume: 0.12, minCrowd: 2.2, stopAfter: 2.05, minDelay: 160, maxDelay: 350 },
-    { src: '/audio/laughter-candidates/small-group-laughter.ogg', volume: 0.18, minCrowd: 1.8, stopAfter: 2.8, minDelay: 10, maxDelay: 50 },
-    { src: '/audio/laughter-candidates/laughter-public-domain.ogg', volume: 0.14, minCrowd: 1.6, stopAfter: 1, minDelay: 10, maxDelay: 50 },
-    { src: '/audio/ride-effects/stealth-launch-reaction-3-9s.ogg', volume: 0.16, minCrowd: 1.2, stopAfter: 6, minDelay: 10, maxDelay: 50 },
-    { src: '/audio/ride-effects/oblivion-happy-squeal-3-4s.ogg', volume: 0.2, minCrowd: 1.2, stopAfter: 1.15, minDelay: 10, maxDelay: 50 },
-  ].map(({ src, volume, minCrowd, stopAfter, minDelay, maxDelay }) => {
+    { src: '/audio/crowd/baby-cry-2s-cc0.ogg', volume: 0.12, tag: 'rare' as const, priority: 0, minCrowd: 2.2, stopAfter: 2.05, minDelay: 160, maxDelay: 350 },
+    { src: '/audio/laughter/small-group-laughter.ogg', volume: 0.18, tag: 'laughter' as const, priority: 1, minCrowd: 1.8, stopAfter: 2.8, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/laughter/laughter-public-domain.ogg', volume: 0.14, tag: 'laughter' as const, priority: 1, minCrowd: 1.6, stopAfter: 1, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/ride-effects/stealth-launch-reaction-3-9s.ogg', volume: 0.2, tag: 'rideReaction' as const, priority: 2, minCrowd: 1.2, stopAfter: 6, minDelay: 10, maxDelay: 50 },
+    { src: '/audio/ride-effects/oblivion-happy-squeal-3-4s.ogg', volume: 0.55, tag: 'rideReaction' as const, priority: 4, minCrowd: 1.2, stopAfter: 1.35, minDelay: 6, maxDelay: 30 },
+  ].map(({ src, volume, tag, priority, minCrowd, stopAfter, minDelay, maxDelay }) => {
     const audio = new Audio(src);
     audio.loop = false;
     audio.preload = 'auto';
@@ -975,6 +996,8 @@ const createCrowdAudio = () => {
     source.connect(gain);
     return {
       audio,
+      tag,
+      priority,
       minCrowd,
       stopAfter,
       minDelay,
@@ -1021,6 +1044,13 @@ const audioTestZoneCrowdAmount = () =>
     return amount + zone.amount * fade * fade;
   }, 0);
 
+const activeAudioTestZone = () =>
+  audioTestZones.find((zone) => {
+    const zonePosition = worldPos(zone.center.x, zone.center.z);
+    const distance = Math.hypot(zonePosition.x - cameraTarget.x, zonePosition.z - cameraTarget.z);
+    return distance <= zone.radius * 0.55;
+  });
+
 const updateCrowdAudio = () => {
   if (!audioContext || !masterMusicGain) return;
   if (!crowdAudio) crowdAudio = createCrowdAudio();
@@ -1028,6 +1058,8 @@ const updateCrowdAudio = () => {
 
   const context = audioContext;
   const crowdAmount = nearbyCrowdAmount();
+  const testZone = activeAudioTestZone();
+  const reactionTestActive = testZone?.labelEn === 'Reaction Test';
   const density = clamp(crowdAmount / 7, 0, 1);
   const targetGain = isPaused ? 0 : clamp(0.035 + density * 0.68, 0, 0.72) * zoomAudioFactor();
   crowdAudio.gain.gain.setTargetAtTime(targetGain, context.currentTime, 0.25);
@@ -1044,11 +1076,17 @@ const updateCrowdAudio = () => {
     if (layer.audio.paused) void layer.audio.play().catch(() => undefined);
   });
 
-  crowdAudio.effects.forEach((effect) => {
+  [...crowdAudio.effects].sort((a, b) => b.priority - a.priority).forEach((effect) => {
     if (effect.stopTime && context.currentTime >= effect.stopTime) {
       effect.audio.pause();
       effect.audio.currentTime = 0;
       effect.stopTime = undefined;
+    }
+
+    const isReactionEffect = effect.tag === 'rideReaction' || effect.tag === 'laughter';
+    if (reactionTestActive && isReactionEffect && effect.audio.paused && context.currentTime < effect.nextTime) {
+      const priorityDelay = effect.priority >= 4 ? 0.35 : 1.2;
+      effect.nextTime = context.currentTime + priorityDelay + Math.random() * (effect.priority >= 4 ? 1.4 : 3.8);
     }
 
     if (targetGain <= 0.045 || crowdAmount < effect.minCrowd || context.currentTime < effect.nextTime || !effect.audio.paused) return;
@@ -1057,7 +1095,9 @@ const updateCrowdAudio = () => {
     void effect.audio.play().catch(() => undefined);
     const denseCrowdFactor = clamp(crowdAmount / 7, 0.25, 1);
     effect.stopTime = context.currentTime + effect.stopAfter;
-    effect.nextTime = context.currentTime + effect.minDelay / denseCrowdFactor + Math.random() * effect.maxDelay;
+    const minDelay = reactionTestActive && isReactionEffect ? (effect.priority >= 4 ? 3 : 5) : effect.minDelay / denseCrowdFactor;
+    const maxDelay = reactionTestActive && isReactionEffect ? (effect.priority >= 4 ? 8 : 14) : effect.maxDelay;
+    effect.nextTime = context.currentTime + minDelay + Math.random() * maxDelay;
   });
 };
 
@@ -1350,7 +1390,10 @@ const setTool = (tool: Tool) => {
 };
 
 toolButtons.forEach((button) => {
-  button.addEventListener('click', () => setTool(button.dataset.tool as Tool));
+  button.addEventListener('click', () => {
+    setTool(button.dataset.tool as Tool);
+    button.blur();
+  });
 });
 
 rideToolButtons.forEach((button) => {
@@ -1370,6 +1413,7 @@ rideToolButtons.forEach((button) => {
       return;
     }
     setTool(tool);
+    button.blur();
     updatePreview();
   });
 });
@@ -1409,6 +1453,10 @@ world.add(placementPreview);
 const clearPreview = () => {
   placementPreview.clear();
 };
+
+const placementRotationY = (step = placementRotationStep) => step * quarterYawStep;
+
+const placementRotationDegrees = () => ((placementRotationStep % 4) + 4) % 4 * 90;
 
 const footprintFor = (tool: Tool, coord: GridCoord) => {
   if (tool !== 'carousel') return [coord];
@@ -1479,6 +1527,58 @@ const bulldozeTargetAt = (coord: GridCoord): BulldozeTarget | null => {
   return null;
 };
 
+const createCarouselPlacementPreview = (valid: boolean) => {
+  const group = new THREE.Group();
+  const bodyMaterial = valid ? carouselPreviewValidMaterial : blockedMaterial;
+  const accentMaterial = valid ? carouselPreviewAccentMaterial : blockedMaterial;
+
+  for (let x = -1; x <= 1; x += 1) {
+    for (let z = -1; z <= 1; z += 1) {
+      const slab = new THREE.Mesh(rideFoundationGeometry, bodyMaterial);
+      slab.position.set(x * tileSize, 0.04, z * tileSize);
+      group.add(slab);
+    }
+  }
+
+  [
+    { geometry: rideBoundaryLongGeometry, position: new THREE.Vector3(0, 0.2, -tileSize * 1.5) },
+    { geometry: rideBoundaryLongGeometry, position: new THREE.Vector3(0, 0.2, tileSize * 1.5) },
+    { geometry: rideBoundaryShortGeometry, position: new THREE.Vector3(-tileSize * 1.5, 0.2, 0) },
+    { geometry: rideBoundaryShortGeometry, position: new THREE.Vector3(tileSize * 1.5, 0.2, 0) },
+  ].forEach(({ geometry, position }) => {
+    const boundary = new THREE.Mesh(geometry, bodyMaterial);
+    boundary.position.copy(position);
+    group.add(boundary);
+  });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.35, 0.34, 24), bodyMaterial);
+  base.position.y = 0.34;
+  group.add(base);
+
+  const platform = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.1, 24), accentMaterial);
+  platform.position.y = 0.56;
+  group.add(platform);
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 2.5, 12), bodyMaterial);
+  mast.position.y = 1.86;
+  group.add(mast);
+
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.35, 1.1, 16), accentMaterial);
+  canopy.position.y = 3.15;
+  group.add(canopy);
+
+  const frontPanel = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.42, 0.16), accentMaterial);
+  frontPanel.position.set(0, 0.46, tileSize * 1.42);
+  group.add(frontPanel);
+
+  const frontMarker = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.42, 3), accentMaterial);
+  frontMarker.position.set(0, 0.18, tileSize * 1.13);
+  frontMarker.rotation.x = Math.PI / 2;
+  group.add(frontMarker);
+
+  return group;
+};
+
 const updatePreview = () => {
   clearPreview();
   if (!hoveredTile) {
@@ -1498,6 +1598,15 @@ const updatePreview = () => {
   selection.visible = true;
   selection.material = valid || activeTool === 'bulldoze' ? selectionMaterial : blockedMaterial;
   selection.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.11));
+
+  if (activeTool === 'carousel') {
+    const preview = createCarouselPlacementPreview(valid);
+    preview.position.copy(worldPos(hoveredTile.x, hoveredTile.z, 0.06));
+    preview.rotation.y = placementRotationY();
+    placementPreview.add(preview);
+    selection.visible = false;
+    return;
+  }
 
   if (activeTool === 'queue' && canPlaceQueue(hoveredTile)) {
     const preview = createQueuePath(true);
@@ -2036,6 +2145,25 @@ const createCarousel = () => {
     boundary.receiveShadow = true;
     foundation.add(boundary);
   });
+
+  const operatorPanel = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.38, 0.18),
+    new THREE.MeshStandardMaterial({ color: 0xf2c94c, roughness: 0.48 }),
+  );
+  operatorPanel.position.set(0, 0.36, tileSize * 1.42);
+  operatorPanel.castShadow = true;
+  operatorPanel.receiveShadow = true;
+  foundation.add(operatorPanel);
+
+  const frontMarker = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.38, 3),
+    new THREE.MeshStandardMaterial({ color: 0xf7f1d1, roughness: 0.46 }),
+  );
+  frontMarker.position.set(0, 0.16, tileSize * 1.14);
+  frontMarker.rotation.x = Math.PI / 2;
+  frontMarker.castShadow = true;
+  foundation.add(frontMarker);
+
   group.add(foundation);
 
   const base = new THREE.Mesh(
@@ -2134,13 +2262,14 @@ const createCarousel = () => {
   return { group, rotor, statusLight, riderVisuals };
 };
 
-const addCarousel = (coord: GridCoord, silent = false) => {
+const addCarousel = (coord: GridCoord, silent = false, rotationStep = placementRotationStep) => {
   if (!canPlaceCarousel(coord)) return false;
 
   const id = `carousel-${rideSerial}`;
   rideSerial += 1;
   const { group, rotor, statusLight, riderVisuals } = createCarousel();
   group.position.copy(worldPos(coord.x, coord.z, 0.03));
+  group.rotation.y = placementRotationY(rotationStep);
   buildGroup.add(group);
 
   const footprint = footprintFor('carousel', coord).map(({ x, z }) => keyOf(x, z));
@@ -2153,6 +2282,7 @@ const addCarousel = (coord: GridCoord, silent = false) => {
     occupiedSeatIndexes: new Set(),
     footprint,
     center: coord,
+    rotationStep,
     isOpen: false,
     musicEnabled: true,
     musicPreset: 'fairgroundOrgan',
@@ -3555,6 +3685,20 @@ canvas.addEventListener(
   },
   { passive: false },
 );
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+
+  if (event.code !== 'KeyR' && event.key.toLowerCase() !== 'r') return;
+  if (activeTool !== 'carousel') return;
+  event.preventDefault();
+  if (event.repeat) return;
+
+  placementRotationStep = (placementRotationStep + 1) % 4;
+  setStatus(t('status.placementRotated', { degrees: placementRotationDegrees() }));
+  updatePreview();
+});
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
