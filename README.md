@@ -9,6 +9,8 @@ npm install
 npm run dev
 ```
 
+로컬 내부 브라우저나 sandboxed iframe에서 dev 서버를 직접 띄워 볼 수 있도록 Vite dev/preview 서버는 CORS와 cross-origin resource policy를 열어 둔다. iframe 쪽에서 `sandbox`를 쓴다면 최소한 `allow-scripts`가 필요하고, 가능하면 `allow-same-origin`도 같이 주는 편이 dev server module loading에 안정적이다.
+
 ## Current Scope
 
 - Vite + TypeScript + Three.js 기본 구성
